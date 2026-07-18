@@ -67,3 +67,6 @@ dmypy.json
 # OS files
 .DS_Store
 Thumbs.db
+
+# non-public files
+project_dox/
