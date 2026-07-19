@@ -26,7 +26,8 @@ dependencies = [
     "boto3",
     "email-validator",
     "fastapi-sso",
-    "redis"
+    "redis",
+    "pyyaml>=6.0"
 ]
 
 [project.optional-dependencies]
@@ -39,4 +40,4 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/litellm_control_plane"]
+packages = ["src"]

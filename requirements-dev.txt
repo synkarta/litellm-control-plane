@@ -199,7 +199,9 @@ python-multipart==0.0.32
 pytokens==0.4.1
     # via black
 pyyaml==6.0.3
-    # via huggingface-hub
+    # via
+    #   litellm-control-plane (pyproject.toml)
+    #   huggingface-hub
 redis==8.0.1
     # via litellm-control-plane (pyproject.toml)
 referencing==0.37.0
