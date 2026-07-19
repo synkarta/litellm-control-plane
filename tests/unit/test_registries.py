@@ -4,7 +4,8 @@ import pytest
 from pydantic import ValidationError
 from src.config.db import init_db, get_db
 from src.registry.models import (
-    NodeCreate, ProviderCreate, ModelCreate, AccountCreate, EndpointCreate
+    NodeCreate, ProviderCreate, ModelCreate, AccountCreate, EndpointCreate,
+    ConsumerCreate, ConsumerKeyCreate
 )
 from src.registry import store
 
@@ -240,3 +241,74 @@ def test_model_update(temp_db):
         # Verify it round-trips correctly through get_model
         retrieved = store.get_model(conn, "m1")
         assert retrieved.capability_embeddings is True
+
+def test_consumer_crud(temp_db):
+    with get_db(temp_db) as conn:
+        # Create
+        cons_in = ConsumerCreate(
+            id="coding-agent",
+            name="Coding Agent Team",
+            max_budget=100.0,
+            rate_limit_rpm=60,
+            rate_limit_tpm=100000,
+            status="active"
+        )
+        created = store.create_consumer(conn, cons_in, actor="admin", reason="init")
+        assert created.id == "coding-agent"
+        assert created.max_budget == 100.0
+
+        # Get
+        retrieved = store.get_consumer(conn, "coding-agent")
+        assert retrieved is not None
+        assert retrieved.name == "Coding Agent Team"
+
+        # List
+        consumers = store.list_consumers(conn)
+        assert len(consumers) == 1
+
+        # Update
+        from src.registry.models import ConsumerUpdate
+        updated = store.update_consumer(conn, "coding-agent", ConsumerUpdate(name="Coding Team Extended", max_budget=200.0), actor="operator")
+        assert updated.name == "Coding Team Extended"
+        assert updated.max_budget == 200.0
+        assert updated.rate_limit_rpm == 60  # unchanged
+
+        # Delete
+        assert store.delete_consumer(conn, "coding-agent", actor="admin")
+        assert store.get_consumer(conn, "coding-agent") is None
+
+def test_consumer_key_crud(temp_db):
+    with get_db(temp_db) as conn:
+        # Setup prerequisites
+        store.create_node(conn, NodeCreate(id="node-1", name="N1", host="10.0.0.1", port=4000, region="us", role="proxy"), actor="admin")
+        store.create_consumer(conn, ConsumerCreate(id="c1", name="C1"), actor="admin")
+
+        # Create ConsumerKey
+        key_in = ConsumerKeyCreate(
+            consumer_id="c1",
+            node_id="node-1",
+            virtual_key="sk-test-key-xyz",
+            status="pending-sync"
+        )
+        created = store.create_consumer_key(conn, key_in, actor="admin")
+        assert created.consumer_id == "c1"
+        assert created.virtual_key == "sk-test-key-xyz"
+        assert created.status == "pending-sync"
+
+        # Get
+        retrieved = store.get_consumer_key(conn, "c1", "node-1")
+        assert retrieved is not None
+        assert retrieved.virtual_key == "sk-test-key-xyz"
+
+        # List
+        keys = store.list_consumer_keys(conn, consumer_id="c1")
+        assert len(keys) == 1
+
+        # Update status
+        updated = store.update_consumer_key_status(conn, "c1", "node-1", status="active", actor="system")
+        assert updated.status == "active"
+
+        # Delete
+        assert store.delete_consumer_key(conn, "c1", "node-1", actor="admin")
+        assert store.get_consumer_key(conn, "c1", "node-1") is None
+

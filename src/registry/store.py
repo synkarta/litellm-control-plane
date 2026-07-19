@@ -7,7 +7,9 @@ from src.registry.models import (
     Provider, ProviderCreate, ProviderUpdate,
     Model, ModelCreate, ModelUpdate,
     Account, AccountCreate,
-    Endpoint, EndpointCreate
+    Endpoint, EndpointCreate,
+    Consumer, ConsumerCreate, ConsumerUpdate,
+    ConsumerKey, ConsumerKeyCreate
 )
 
 # --- Nodes Store ---
@@ -386,3 +388,162 @@ def list_audit_logs(conn: sqlite3.Connection, limit: int = 100) -> List[Dict[str
             pass
         logs.append(d)
     return logs
+
+
+# --- Consumers Store ---
+
+def create_consumer(conn: sqlite3.Connection, consumer: ConsumerCreate, actor: str, reason: Optional[str] = None) -> Consumer:
+    try:
+        conn.execute(
+            """
+            INSERT INTO consumers (id, name, max_budget, rate_limit_rpm, rate_limit_tpm, status)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                consumer.id,
+                consumer.name,
+                consumer.max_budget,
+                consumer.rate_limit_rpm,
+                consumer.rate_limit_tpm,
+                consumer.status
+            )
+        )
+        created = get_consumer(conn, consumer.id)
+        assert created is not None
+        log_audit(conn, actor, "create", "consumer", consumer.id, created.model_dump(), reason)
+        return created
+    except sqlite3.IntegrityError as e:
+        raise ValueError(f"Consumer already exists or constraint failed: {e}")
+
+def get_consumer(conn: sqlite3.Connection, consumer_id: str) -> Optional[Consumer]:
+    row = conn.execute("SELECT * FROM consumers WHERE id = ?", (consumer_id,)).fetchone()
+    if row:
+        return Consumer.model_validate(dict(row))
+    return None
+
+def list_consumers(conn: sqlite3.Connection) -> List[Consumer]:
+    cursor = conn.execute("SELECT * FROM consumers")
+    return [Consumer.model_validate(dict(row)) for row in cursor.fetchall()]
+
+def update_consumer(
+    conn: sqlite3.Connection,
+    consumer_id: str,
+    update: ConsumerUpdate,
+    actor: str,
+    reason: Optional[str] = None
+) -> Optional[Consumer]:
+    old = get_consumer(conn, consumer_id)
+    if not old:
+        return None
+    fields = update.model_dump(exclude_none=True)
+    if not fields:
+        return old
+    set_clause = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values()) + [consumer_id]
+    conn.execute(f"UPDATE consumers SET {set_clause} WHERE id = ?", values)
+    new = get_consumer(conn, consumer_id)
+    assert new is not None
+    diff = {"before": old.model_dump(), "after": new.model_dump()}
+    log_audit(conn, actor, "update", "consumer", consumer_id, diff, reason)
+    return new
+
+def delete_consumer(conn: sqlite3.Connection, consumer_id: str, actor: str, reason: Optional[str] = None) -> bool:
+    consumer = get_consumer(conn, consumer_id)
+    if not consumer:
+        return False
+    conn.execute("DELETE FROM consumers WHERE id = ?", (consumer_id,))
+    log_audit(conn, actor, "delete", "consumer", consumer_id, consumer.model_dump(), reason)
+    return True
+
+
+# --- Consumer Keys Store ---
+
+def create_consumer_key(conn: sqlite3.Connection, consumer_key: ConsumerKeyCreate, actor: str, reason: Optional[str] = None) -> ConsumerKey:
+    try:
+        conn.execute(
+            """
+            INSERT INTO consumer_keys (consumer_id, node_id, virtual_key, status)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                consumer_key.consumer_id,
+                consumer_key.node_id,
+                consumer_key.virtual_key,
+                consumer_key.status
+            )
+        )
+        created = get_consumer_key(conn, consumer_key.consumer_id, consumer_key.node_id)
+        assert created is not None
+        log_audit(conn, actor, "create_key", "consumer_key", f"{consumer_key.consumer_id}:{consumer_key.node_id}", created.model_dump(), reason)
+        return created
+    except sqlite3.IntegrityError as e:
+        raise ValueError(f"ConsumerKey violates constraints. Ensure consumer_id and node_id exist: {e}")
+
+def get_consumer_key(conn: sqlite3.Connection, consumer_id: str, node_id: str) -> Optional[ConsumerKey]:
+    row = conn.execute(
+        "SELECT * FROM consumer_keys WHERE consumer_id = ? AND node_id = ?",
+        (consumer_id, node_id)
+    ).fetchone()
+    if row:
+        return ConsumerKey.model_validate(dict(row))
+    return None
+
+def list_consumer_keys(conn: sqlite3.Connection, consumer_id: Optional[str] = None) -> List[ConsumerKey]:
+    if consumer_id:
+        cursor = conn.execute("SELECT * FROM consumer_keys WHERE consumer_id = ?", (consumer_id,))
+    else:
+        cursor = conn.execute("SELECT * FROM consumer_keys")
+    return [ConsumerKey.model_validate(dict(row)) for row in cursor.fetchall()]
+
+def update_consumer_key_status(
+    conn: sqlite3.Connection,
+    consumer_id: str,
+    node_id: str,
+    status: str,
+    actor: str,
+    reason: Optional[str] = None
+) -> Optional[ConsumerKey]:
+    old = get_consumer_key(conn, consumer_id, node_id)
+    if not old:
+        return None
+    conn.execute(
+        "UPDATE consumer_keys SET status = ? WHERE consumer_id = ? AND node_id = ?",
+        (status, consumer_id, node_id)
+    )
+    new = get_consumer_key(conn, consumer_id, node_id)
+    assert new is not None
+    diff = {"before": old.model_dump(), "after": new.model_dump()}
+    log_audit(conn, actor, "update_key_status", "consumer_key", f"{consumer_id}:{node_id}", diff, reason)
+    return new
+
+def update_consumer_key(
+    conn: sqlite3.Connection,
+    consumer_id: str,
+    node_id: str,
+    virtual_key: str,
+    status: str,
+    actor: str,
+    reason: Optional[str] = None
+) -> Optional[ConsumerKey]:
+    """Update both the virtual_key value and status atomically, with audit trail."""
+    old = get_consumer_key(conn, consumer_id, node_id)
+    if not old:
+        return None
+    conn.execute(
+        "UPDATE consumer_keys SET virtual_key = ?, status = ? WHERE consumer_id = ? AND node_id = ?",
+        (virtual_key, status, consumer_id, node_id)
+    )
+    new = get_consumer_key(conn, consumer_id, node_id)
+    assert new is not None
+    diff = {"before": old.model_dump(), "after": new.model_dump()}
+    log_audit(conn, actor, "update_key", "consumer_key", f"{consumer_id}:{node_id}", diff, reason)
+    return new
+
+def delete_consumer_key(conn: sqlite3.Connection, consumer_id: str, node_id: str, actor: str, reason: Optional[str] = None) -> bool:
+    key = get_consumer_key(conn, consumer_id, node_id)
+    if not key:
+        return False
+    conn.execute("DELETE FROM consumer_keys WHERE consumer_id = ? AND node_id = ?", (consumer_id, node_id))
+    log_audit(conn, actor, "delete_key", "consumer_key", f"{consumer_id}:{node_id}", key.model_dump(), reason)
+    return True
+

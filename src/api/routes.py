@@ -1,13 +1,15 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from src.config.db import get_db_dep
-from src.registry import store
+from src.registry import store, key_manager
 from src.registry.models import (
     Node, NodeCreate, NodeUpdate,
     Provider, ProviderCreate, ProviderUpdate,
     Model, ModelCreate, ModelUpdate,
     Account, AccountCreate,
-    Endpoint, EndpointCreate
+    Endpoint, EndpointCreate,
+    Consumer, ConsumerCreate, ConsumerUpdate,
+    ConsumerKey
 )
 
 router = APIRouter()
@@ -229,8 +231,54 @@ def delete_endpoint(id: str, actor: str = Depends(get_actor), conn = Depends(get
     return {"detail": "Endpoint deleted"}
 
 
+# --- Consumers Endpoints ---
+
+@router.post("/registry/consumers", response_model=Consumer, tags=["consumers"])
+def create_consumer(consumer: ConsumerCreate, actor: str = Depends(get_actor), conn = Depends(get_db_dep)):
+    try:
+        res = store.create_consumer(conn, consumer, actor=actor)
+        key_manager.sync_consumer_to_all_nodes(conn, res.id)
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+@router.get("/registry/consumers", response_model=List[Consumer], tags=["consumers"])
+def list_consumers(conn = Depends(get_db_dep)):
+    return store.list_consumers(conn)
+
+@router.get("/registry/consumers/{id}", response_model=Consumer, tags=["consumers"])
+def get_consumer(id: str, conn = Depends(get_db_dep)):
+    consumer = store.get_consumer(conn, id)
+    if not consumer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Consumer not found")
+    return consumer
+
+@router.patch("/registry/consumers/{id}", response_model=Consumer, tags=["consumers"])
+def update_consumer(id: str, update: ConsumerUpdate, actor: str = Depends(get_actor), conn = Depends(get_db_dep)):
+    res = store.update_consumer(conn, id, update, actor=actor)
+    if not res:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Consumer not found")
+    key_manager.sync_consumer_to_all_nodes(conn, res.id)
+    return res
+
+@router.delete("/registry/consumers/{id}", tags=["consumers"])
+def delete_consumer(id: str, actor: str = Depends(get_actor), conn = Depends(get_db_dep)):
+    # M3 fix: check existence first before any remote operations
+    if not store.get_consumer(conn, id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Consumer not found")
+    key_manager.delete_consumer_from_all_nodes(conn, id)
+    store.delete_consumer(conn, id, actor=actor)
+    return {"detail": "Consumer deleted"}
+
+@router.get("/registry/consumers/{id}/keys", response_model=List[ConsumerKey], tags=["consumers"])
+def list_consumer_keys(id: str, conn = Depends(get_db_dep)):
+    return store.list_consumer_keys(conn, consumer_id=id)
+
+
+
 # --- Audit Logs Endpoints ---
 
 @router.get("/audit-logs", tags=["audit"])
 def list_audit_logs(limit: int = Query(100, ge=1, le=1000), conn = Depends(get_db_dep)):
     return store.list_audit_logs(conn, limit=limit)
+

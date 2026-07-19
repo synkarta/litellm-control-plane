@@ -100,3 +100,37 @@ class EndpointCreate(EndpointBase):
 
 class Endpoint(EndpointBase):
     model_config = {"from_attributes": True}
+
+class ConsumerBase(BaseModel):
+    id: str = Field(..., description="Unique consumer identifier, e.g. coding-agent")
+    name: str
+    max_budget: Optional[float] = Field(None, description="Max budget allowance")
+    rate_limit_rpm: Optional[int] = Field(None, description="Requests per minute limit")
+    rate_limit_tpm: Optional[int] = Field(None, description="Tokens per minute limit")
+    status: Literal["active", "disabled"] = "active"
+
+class ConsumerCreate(ConsumerBase):
+    pass
+
+class ConsumerUpdate(BaseModel):
+    name: Optional[str] = None
+    max_budget: Optional[float] = None
+    rate_limit_rpm: Optional[int] = None
+    rate_limit_tpm: Optional[int] = None
+    status: Optional[Literal["active", "disabled"]] = None
+
+class Consumer(ConsumerBase):
+    model_config = {"from_attributes": True}
+
+class ConsumerKeyBase(BaseModel):
+    consumer_id: str
+    node_id: str
+    virtual_key: str
+    status: Literal["active", "pending-sync", "disabled", "error"] = "pending-sync"
+
+class ConsumerKeyCreate(ConsumerKeyBase):
+    pass
+
+class ConsumerKey(ConsumerKeyBase):
+    model_config = {"from_attributes": True}
+

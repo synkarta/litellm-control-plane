@@ -147,3 +147,50 @@ def test_full_registry_crud_via_api(api_client):
     assert api_client.delete("/registry/models/gpt-4o", headers=headers).status_code == 200
     assert api_client.delete("/registry/providers/openai", headers=headers).status_code == 200
     assert api_client.delete("/registry/nodes/node-kr-1", headers=headers).status_code == 200
+
+def test_consumer_api_flow(api_client):
+    headers = {"X-Admin-API-Key": "admin-api-key-123", "X-Actor": "test-actor"}
+
+    # 1. Create Consumer
+    consumer_data = {
+        "id": "c-integration",
+        "name": "Integration Customer",
+        "max_budget": 50.0,
+        "rate_limit_rpm": 10,
+        "rate_limit_tpm": 50000,
+        "status": "active"
+    }
+    response = api_client.post("/registry/consumers", json=consumer_data, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["id"] == "c-integration"
+
+    # 2. Get Consumer
+    response = api_client.get("/registry/consumers/c-integration", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["name"] == "Integration Customer"
+
+    # 3. List Consumers
+    response = api_client.get("/registry/consumers", headers=headers)
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+
+    # 4. Patch Consumer
+    patch_data = {"name": "Integration Customer Extended", "max_budget": 75.0}
+    response = api_client.patch("/registry/consumers/c-integration", json=patch_data, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["name"] == "Integration Customer Extended"
+    assert response.json()["max_budget"] == 75.0
+
+    # 5. List Consumer Keys (should be empty initially)
+    response = api_client.get("/registry/consumers/c-integration/keys", headers=headers)
+    assert response.status_code == 200
+    assert len(response.json()) == 0
+
+    # 6. Delete Consumer
+    response = api_client.delete("/registry/consumers/c-integration", headers=headers)
+    assert response.status_code == 200
+    assert response.json() == {"detail": "Consumer deleted"}
+
+    # Get should 404 now
+    assert api_client.get("/registry/consumers/c-integration", headers=headers).status_code == 404
+

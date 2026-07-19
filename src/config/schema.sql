@@ -74,3 +74,28 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     changes TEXT NOT NULL, -- JSON string representing diff
     reason TEXT
 );
+
+-- Consumers Table
+CREATE TABLE IF NOT EXISTS consumers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    max_budget REAL,
+    rate_limit_rpm INTEGER,
+    rate_limit_tpm INTEGER,
+    status TEXT NOT NULL DEFAULT 'active'
+);
+
+-- Consumer Keys (Virtual keys dynamically generated per consumer on each node)
+CREATE TABLE IF NOT EXISTS consumer_keys (
+    consumer_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    virtual_key TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    PRIMARY KEY (consumer_id, node_id),
+    FOREIGN KEY (consumer_id) REFERENCES consumers(id) ON DELETE CASCADE,
+    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+);
+
+-- Indices for consumer tables
+CREATE INDEX IF NOT EXISTS idx_consumer_keys_node_id ON consumer_keys(node_id);
+
