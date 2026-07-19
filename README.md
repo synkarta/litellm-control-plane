@@ -71,7 +71,40 @@ litellm-control-plane/
 └── docs/                       # Specifications, ADRs, and runbooks
 ```
 
+## Cross-Platform & Deployment Options
+
+This codebase is designed to be highly portable and run identically on Windows, Linux, and macOS.
+
+### Native Execution (Recommended for Dev & Local Testing)
+Because the codebase is pure Python (>=3.12) and uses a serverless SQLite database, you can easily copy and run it anywhere natively. The database file (`control_plane.db`) is self-contained and fully binary-compatible across OS boundaries.
+
+To run natively:
+1. Initialize a virtual environment:
+   ```bash
+   python -m venv .venv
+   ```
+2. Install dependencies:
+   * **Windows**: `.venv\Scripts\pip.exe install -r requirements.txt`
+   * **Linux/macOS**: `.venv/bin/pip install -r requirements.txt`
+3. Start the API server:
+   * **Windows**: `.venv\Scripts\python.exe -m uvicorn src.api.main:app --reload`
+   * **Linux/macOS**: `.venv/bin/python -m uvicorn src.api.main:app --reload`
+
+### Docker Containerization (Optional)
+Using Docker is **completely optional** and not required for development or simple deployments. If containerized orchestration (such as Kubernetes) is desired:
+1. Build the image:
+   ```bash
+   docker build -t litellm-control-plane .
+   ```
+2. Run the container (mounting a local host folder for SQLite persistence):
+   ```bash
+   docker run -p 8000:8000 -v ./data:/app/data litellm-control-plane
+   ```
+
+---
+
 ## Getting Started
 
 Refer to the [deployment guide](file:///h:/litellm-control-plane/docs/deployment-guide.md) for local installation instructions.
 For development details and AI coding constraints, see [ai-dev-rules.md](file:///h:/litellm-control-plane/docs/ai-dev-rules.md).
+

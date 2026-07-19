@@ -109,8 +109,10 @@ class LiteLLMAdapter:
         """
         proxy_url = f"http://127.0.0.1:{port}"
         
-        # Check standard paths for LiteLLM executable on Windows
+        # Check standard paths for LiteLLM executable (Windows vs Linux/macOS)
         litellm_exe = os.path.join(".venv", "Scripts", "litellm.exe")
+        if not os.path.exists(litellm_exe):
+            litellm_exe = os.path.join(".venv", "bin", "litellm")
         if not os.path.exists(litellm_exe):
             litellm_exe = "litellm"
             
