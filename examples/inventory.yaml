@@ -1,0 +1,106 @@
+# Example Inventory Configuration for LiteLLM Control Plane
+
+providers:
+  - id: "openai"
+    name: "OpenAI Inc"
+    type: "openai"
+  - id: "gemini"
+    name: "Google Gemini API"
+    type: "gemini"
+  - id: "ollama"
+    name: "Local Ollama Instance"
+    type: "ollama"
+
+nodes:
+  - id: "node-kr-1"
+    name: "Korea Proxy Node"
+    host: "10.0.1.10"
+    port: 4000
+    region: "ap-northeast-2"
+    role: "proxy"
+    status: "active"
+  - id: "node-us-1"
+    name: "US Proxy Node"
+    host: "10.0.2.10"
+    port: 4000
+    region: "us-east-1"
+    role: "proxy"
+    status: "active"
+  - id: "node-local-gpu"
+    name: "Local Ollama Node"
+    host: "127.0.0.1"
+    port: 11434
+    region: "local"
+    role: "local-inference"
+    status: "active"
+
+models:
+  - id: "gpt-4o"
+    name: "openai/gpt-4o"
+    logical_group: "premium-chat"
+    capability_chat: true
+    capability_stream: true
+    capability_tools: true
+    capability_embeddings: false
+  - id: "gemini-flash"
+    name: "gemini/gemini-2.5-flash"
+    logical_group: "general-chat"
+    capability_chat: true
+    capability_stream: true
+    capability_tools: true
+    capability_embeddings: false
+  - id: "llama-3"
+    name: "ollama/llama3"
+    logical_group: "local-chat"
+    capability_chat: true
+    capability_stream: true
+    capability_tools: false
+    capability_embeddings: false
+
+accounts:
+  - id: "acc-openai-prod"
+    name: "OpenAI Enterprise Production"
+    provider_id: "openai"
+    secret_ref: "doppler://LITELLM_CP/PROD/OPENAI_API_KEY"
+    status: "active"
+  - id: "acc-gemini-free"
+    name: "Gemini Free Tier Account"
+    provider_id: "gemini"
+    secret_ref: "doppler://LITELLM_CP/DEV/GEMINI_API_KEY"
+    status: "active"
+  - id: "acc-ollama-local"
+    name: "Ollama Anonymous Account"
+    provider_id: "ollama"
+    secret_ref: "doppler://LITELLM_CP/DEV/OLLAMA_API_KEY"
+    status: "active"
+
+endpoints:
+  # Primary route for premium chat on US Node via OpenAI
+  - id: "ep-us-gpt4o"
+    node_id: "node-us-1"
+    account_id: "acc-openai-prod"
+    model_id: "gpt-4o"
+    priority: 1
+    weight: 100
+    status: "active"
+    manual_override: "none"
+
+  # Primary route for general chat on KR Node via Gemini
+  - id: "ep-kr-gemini"
+    node_id: "node-kr-1"
+    account_id: "acc-gemini-free"
+    model_id: "gemini-flash"
+    priority: 1
+    weight: 100
+    status: "active"
+    manual_override: "none"
+
+  # Fallback route for general chat on KR Node pointing to local Llama 3
+  - id: "ep-kr-llama3"
+    node_id: "node-kr-1"
+    account_id: "acc-ollama-local"
+    model_id: "llama-3"
+    priority: 2
+    weight: 50
+    status: "active"
+    manual_override: "none"
