@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, Union
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from src.config.db import get_db_dep
 from src.registry import store, key_manager
@@ -11,6 +11,8 @@ from src.registry.models import (
     Consumer, ConsumerCreate, ConsumerUpdate,
     ConsumerKey
 )
+from src.health import manager as health_manager
+from src.events import ingestion
 
 router = APIRouter()
 
@@ -282,3 +284,134 @@ def list_consumer_keys(id: str, conn = Depends(get_db_dep)):
 def list_audit_logs(limit: int = Query(100, ge=1, le=1000), conn = Depends(get_db_dep)):
     return store.list_audit_logs(conn, limit=limit)
 
+
+# --- Health & Ingestion Endpoints ---
+
+@router.post("/events/callback", tags=["events"])
+def ingest_event_callback(
+    payload: Union[List[Dict[str, Any]], Dict[str, Any]],
+    conn = Depends(get_db_dep)
+):
+    """
+    Webhook endpoint to ingest events from LiteLLM proxy nodes.
+    """
+    return ingestion.ingest_event_callback(payload, conn)
+
+@router.get("/health/summary", tags=["health"])
+def health_summary(conn = Depends(get_db_dep)):
+    """
+    Query consolidated health state across all nodes, accounts, and endpoints.
+    """
+    return health_manager.get_health_summary(conn)
+
+@router.get("/health/incidents", tags=["health"])
+def health_incidents(
+    limit: int = Query(100, ge=1, le=1000),
+    target_type: Optional[str] = Query(None, description="Filter by entity type: 'account' or 'endpoint'"),
+    target_id: Optional[str] = Query(None, description="Filter by a specific account or endpoint ID"),
+    state_to: Optional[str] = Query(None, description="Filter by destination state, e.g. 'disabled', 'cooldown', 'degraded'"),
+    conn = Depends(get_db_dep)
+):
+    """
+    Retrieve logs of health state transitions and provider failures.
+    Use filters to drill down to a specific resource or failure type for operator review.
+    """
+    return health_manager.get_incidents_list(
+        conn,
+        limit=limit,
+        target_type=target_type,
+        target_id=target_id,
+        state_to=state_to,
+    )
+
+# L3: Per-entity health detail endpoints for operator drill-down
+
+@router.get("/health/accounts/{id}", tags=["health"])
+def health_account_detail(id: str, conn = Depends(get_db_dep)):
+    """
+    Return health detail for a specific account: current state, cooldown info,
+    failure count, and recent incident history. Intended for operator review
+    when verifying a disabled or degraded account.
+    """
+    acc = store.get_account(conn, id)
+    if not acc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    incidents = store.list_incidents(conn, target_type="account", target_id=id, limit=20)
+    return {
+        "account": {
+            "id": acc.id,
+            "name": acc.name,
+            "provider_id": acc.provider_id,
+            "secret_ref": acc.secret_ref,
+            "status": acc.status,
+            "cooldown_until": acc.cooldown_until,
+            "failure_count": acc.failure_count,
+        },
+        "recent_incidents": incidents,
+    }
+
+@router.get("/health/endpoints/{id}", tags=["health"])
+def health_endpoint_detail(id: str, conn = Depends(get_db_dep)):
+    """
+    Return health detail for a specific endpoint: current state, cooldown info,
+    failure count, manual override, and recent incident history.
+    """
+    ep = store.get_endpoint(conn, id)
+    if not ep:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Endpoint not found")
+    incidents = store.list_incidents(conn, target_type="endpoint", target_id=id, limit=20)
+    return {
+        "endpoint": {
+            "id": ep.id,
+            "node_id": ep.node_id,
+            "account_id": ep.account_id,
+            "model_id": ep.model_id,
+            "status": ep.status,
+            "manual_override": ep.manual_override,
+            "cooldown_until": ep.cooldown_until,
+            "failure_count": ep.failure_count,
+        },
+        "recent_incidents": incidents,
+    }
+
+# L5: Explicit operator enable endpoints
+
+@router.post("/registry/accounts/{id}/enable", response_model=Account, tags=["accounts"])
+def enable_account(
+    id: str,
+    actor: str = Depends(get_actor),
+    conn = Depends(get_db_dep)
+):
+    """
+    Operator action: re-enable a disabled or cooldown account.
+    Clears cooldown_until and resets failure_count to 0.
+    Use after verifying provider feedback via GET /health/accounts/{id}.
+    """
+    acc = store.get_account(conn, id)
+    if not acc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    updated = store.update_account_status(
+        conn, id, "active", actor=actor,
+        reason="Manual re-enable by operator"
+    )
+    return updated
+
+@router.post("/registry/endpoints/{id}/enable", response_model=Endpoint, tags=["endpoints"])
+def enable_endpoint(
+    id: str,
+    actor: str = Depends(get_actor),
+    conn = Depends(get_db_dep)
+):
+    """
+    Operator action: re-enable a disabled or cooldown endpoint.
+    Clears cooldown_until and resets failure_count to 0.
+    Use after verifying provider feedback via GET /health/endpoints/{id}.
+    """
+    ep = store.get_endpoint(conn, id)
+    if not ep:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Endpoint not found")
+    updated = store.update_endpoint_status(
+        conn, id, status="active", manual_override=None,
+        actor=actor, reason="Manual re-enable by operator"
+    )
+    return updated

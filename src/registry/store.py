@@ -257,7 +257,10 @@ def update_account_status(
     if not old:
         return None
     
-    conn.execute("UPDATE accounts SET status = ? WHERE id = ?", (status, account_id))
+    if status == "active":
+        conn.execute("UPDATE accounts SET status = ?, cooldown_until = NULL, failure_count = 0 WHERE id = ?", (status, account_id))
+    else:
+        conn.execute("UPDATE accounts SET status = ? WHERE id = ?", (status, account_id))
     new = get_account(conn, account_id)
     assert new is not None
     diff = {"before": old.model_dump(), "after": new.model_dump()}
@@ -353,10 +356,16 @@ def update_endpoint_status(
     new_status = status if status is not None else old.status
     new_override = manual_override if manual_override is not None else old.manual_override
     
-    conn.execute(
-        "UPDATE endpoints SET status = ?, manual_override = ? WHERE id = ?",
-        (new_status, new_override, endpoint_id)
-    )
+    if new_status == "active":
+        conn.execute(
+            "UPDATE endpoints SET status = ?, manual_override = ?, cooldown_until = NULL, failure_count = 0 WHERE id = ?",
+            (new_status, new_override, endpoint_id)
+        )
+    else:
+        conn.execute(
+            "UPDATE endpoints SET status = ?, manual_override = ? WHERE id = ?",
+            (new_status, new_override, endpoint_id)
+        )
     new = get_endpoint(conn, endpoint_id)
     assert new is not None
     diff = {"before": old.model_dump(), "after": new.model_dump()}
@@ -546,4 +555,104 @@ def delete_consumer_key(conn: sqlite3.Connection, consumer_id: str, node_id: str
     conn.execute("DELETE FROM consumer_keys WHERE consumer_id = ? AND node_id = ?", (consumer_id, node_id))
     log_audit(conn, actor, "delete_key", "consumer_key", f"{consumer_id}:{node_id}", key.model_dump(), reason)
     return True
+
+# --- State Machine & Incidents Helpers ---
+
+def set_account_cooldown(
+    conn: sqlite3.Connection,
+    account_id: str,
+    cooldown_until: str,
+    actor: str,
+    reason: Optional[str] = None
+) -> Optional[Account]:
+    old = get_account(conn, account_id)
+    if not old:
+        return None
+    conn.execute(
+        "UPDATE accounts SET status = 'cooldown', cooldown_until = ? WHERE id = ?",
+        (cooldown_until, account_id)
+    )
+    new = get_account(conn, account_id)
+    assert new is not None
+    log_audit(conn, actor, "update_status", "account", account_id, {"before": old.model_dump(), "after": new.model_dump()}, reason)
+    return new
+
+def set_endpoint_cooldown(
+    conn: sqlite3.Connection,
+    endpoint_id: str,
+    cooldown_until: str,
+    actor: str,
+    reason: Optional[str] = None
+) -> Optional[Endpoint]:
+    old = get_endpoint(conn, endpoint_id)
+    if not old:
+        return None
+    conn.execute(
+        "UPDATE endpoints SET status = 'cooldown', cooldown_until = ? WHERE id = ?",
+        (cooldown_until, endpoint_id)
+    )
+    new = get_endpoint(conn, endpoint_id)
+    assert new is not None
+    log_audit(conn, actor, "update_status", "endpoint", endpoint_id, {"before": old.model_dump(), "after": new.model_dump()}, reason)
+    return new
+
+def increment_account_failure(conn: sqlite3.Connection, account_id: str) -> int:
+    conn.execute("UPDATE accounts SET failure_count = failure_count + 1 WHERE id = ?", (account_id,))
+    row = conn.execute("SELECT failure_count FROM accounts WHERE id = ?", (account_id,)).fetchone()
+    return row[0] if row else 0
+
+def increment_endpoint_failure(conn: sqlite3.Connection, endpoint_id: str) -> int:
+    conn.execute("UPDATE endpoints SET failure_count = failure_count + 1 WHERE id = ?", (endpoint_id,))
+    row = conn.execute("SELECT failure_count FROM endpoints WHERE id = ?", (endpoint_id,)).fetchone()
+    return row[0] if row else 0
+
+def create_incident(
+    conn: sqlite3.Connection,
+    target_type: str,
+    target_id: str,
+    state_from: str,
+    state_to: str,
+    reason: Optional[str] = None,
+    raw_response: Optional[str] = None,
+) -> Dict[str, Any]:
+    import uuid
+    incident_id = f"inc-{uuid.uuid4().hex[:8]}"
+    conn.execute(
+        """
+        INSERT INTO incidents (id, target_type, target_id, state_from, state_to, reason, raw_response)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (incident_id, target_type, target_id, state_from, state_to, reason, raw_response)
+    )
+    row = conn.execute("SELECT * FROM incidents WHERE id = ?", (incident_id,)).fetchone()
+    return dict(row)
+
+def list_incidents(
+    conn: sqlite3.Connection,
+    limit: int = 100,
+    target_type: Optional[str] = None,
+    target_id: Optional[str] = None,
+    state_to: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    clauses = []
+    params: List[Any] = []
+
+    if target_type:
+        clauses.append("target_type = ?")
+        params.append(target_type)
+    if target_id:
+        clauses.append("target_id = ?")
+        params.append(target_id)
+    if state_to:
+        clauses.append("state_to = ?")
+        params.append(state_to)
+
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    params.append(limit)
+    cursor = conn.execute(
+        f"SELECT * FROM incidents {where} ORDER BY timestamp DESC LIMIT ?",
+        params
+    )
+    return [dict(row) for row in cursor.fetchall()]
+
 

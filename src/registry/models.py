@@ -70,7 +70,9 @@ class AccountBase(BaseModel):
     name: str
     provider_id: str
     secret_ref: str = Field(..., description="Doppler secret reference, e.g. doppler://PROJECT/CONFIG/SECRET")
-    status: Literal["active", "inactive", "cooldown", "disabled"] = "active"
+    status: Literal["active", "inactive", "cooldown", "disabled", "degraded", "probe", "recovered"] = "active"
+    cooldown_until: Optional[str] = Field(None, description="ISO-8601 timestamp for cooldown end")
+    failure_count: int = Field(default=0, description="Consecutive failure count")
 
     @field_validator("secret_ref")
     @classmethod
@@ -92,8 +94,10 @@ class EndpointBase(BaseModel):
     model_id: str
     priority: int = Field(default=1, description="Primary (1) vs Fallback (2+)")
     weight: int = Field(default=100, description="Load balancing weight")
-    status: Literal["active", "degraded", "cooldown", "disabled"] = "active"
+    status: Literal["active", "degraded", "cooldown", "disabled", "probe", "recovered"] = "active"
     manual_override: Literal["none", "force-active", "force-disabled"] = "none"
+    cooldown_until: Optional[str] = Field(None, description="ISO-8601 timestamp for cooldown end")
+    failure_count: int = Field(default=0, description="Consecutive failure count")
 
 class EndpointCreate(EndpointBase):
     pass

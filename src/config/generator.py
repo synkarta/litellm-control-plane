@@ -54,10 +54,18 @@ class ConfigGenerator:
                 )
 
             # Apply exclusion filters
-            if ep_status == "disabled" or manual_override == "force-disabled":
+            if manual_override == "force-disabled":
                 continue
-            if acc_status in ("disabled", "inactive"):
-                continue
+
+            if manual_override != "force-active":
+                if ep_status in ("disabled", "cooldown", "degraded"):
+                    continue
+                if acc_status in ("disabled", "inactive", "cooldown"):
+                    continue
+            else:
+                # force-active endpoints are still excluded if their account is disabled or inactive
+                if acc_status in ("disabled", "inactive"):
+                    continue
 
             # Resolve secret
             secret_ref = r["secret_ref"]

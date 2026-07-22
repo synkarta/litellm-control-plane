@@ -24,9 +24,27 @@ def init_db(db_path: str | None = None) -> None:
     try:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.executescript(schema_sql)
+
+        # Additive column migrations — safe to run on existing databases.
+        # SQLite does not support ALTER TABLE ADD COLUMN IF NOT EXISTS,
+        # so we catch OperationalError and ignore it when the column already exists.
+        _safe_add_column(conn, "incidents", "raw_response", "TEXT")
+        _safe_add_column(conn, "accounts", "cooldown_until", "TEXT")
+        _safe_add_column(conn, "accounts", "failure_count", "INTEGER DEFAULT 0")
+        _safe_add_column(conn, "endpoints", "cooldown_until", "TEXT")
+        _safe_add_column(conn, "endpoints", "failure_count", "INTEGER DEFAULT 0")
+
         conn.commit()
     finally:
         conn.close()
+
+def _safe_add_column(conn: sqlite3.Connection, table: str, column: str, col_type: str) -> None:
+    """Add a column to a table if it does not already exist."""
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
 
 @contextmanager
 def get_db(db_path: str | None = None):

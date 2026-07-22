@@ -1,15 +1,48 @@
+import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, Security, HTTPException, status
 from fastapi.security.api_key import APIKeyHeader
-from src.config.db import init_db
+from src.config.db import init_db, get_db
 from src.api import routes
+
+logger = logging.getLogger("main")
+
+async def _reconcile_loop(interval_sec: int = 30) -> None:
+    """Background task: periodically reconcile expired cooldowns and trigger probes."""
+    # Lazy import to avoid circular dependency at module load
+    from src.health.probe import ProbeEngine
+    from src.secrets.doppler import DopplerResolver
+
+    resolver = DopplerResolver()
+    engine = ProbeEngine(resolver=resolver)
+
+    while True:
+        await asyncio.sleep(interval_sec)
+        try:
+            with get_db() as conn:
+                engine.reconcile_cooldowns(conn, actor="reconcile-worker")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Reconcile loop error: {e}", exc_info=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Run database schema migrations on startup."""
+    """Startup: init DB schema and launch background reconcile loop. Shutdown: cancel loop."""
     init_db()
-    yield
+    task = asyncio.create_task(_reconcile_loop(interval_sec=30))
+    logger.info("Background reconcile loop started (interval=30s)")
+    try:
+        yield
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Background reconcile loop stopped")
 
 app = FastAPI(
     title="LiteLLM Control Plane API",
@@ -39,4 +72,5 @@ def health():
 
 # Register authenticated registry and audit routes
 app.include_router(routes.router, dependencies=[Depends(get_api_key)])
+
 

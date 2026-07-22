@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     provider_id TEXT NOT NULL,
     secret_ref TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'active',
+    cooldown_until TEXT,
+    failure_count INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE RESTRICT
 );
 
@@ -52,6 +54,8 @@ CREATE TABLE IF NOT EXISTS endpoints (
     weight INTEGER NOT NULL DEFAULT 100,
     status TEXT NOT NULL DEFAULT 'active',
     manual_override TEXT NOT NULL DEFAULT 'none',
+    cooldown_until TEXT,
+    failure_count INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE,
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE RESTRICT,
     FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE RESTRICT
@@ -98,4 +102,17 @@ CREATE TABLE IF NOT EXISTS consumer_keys (
 
 -- Indices for consumer tables
 CREATE INDEX IF NOT EXISTS idx_consumer_keys_node_id ON consumer_keys(node_id);
+
+-- Incidents and Health Transitions Table
+CREATE TABLE IF NOT EXISTS incidents (
+    id TEXT PRIMARY KEY,
+    target_type TEXT NOT NULL, -- 'account' or 'endpoint'
+    target_id TEXT NOT NULL,
+    state_from TEXT NOT NULL,
+    state_to TEXT NOT NULL,
+    reason TEXT,
+    raw_response TEXT,         -- JSON string of raw provider error payload, if available
+    timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
 
