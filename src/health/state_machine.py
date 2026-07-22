@@ -129,6 +129,13 @@ def transition_endpoint_state(
 
     return store.get_endpoint(conn, endpoint_id)
 
+def is_auth_error(error_code: int, error_message: str) -> bool:
+    """
+    Determine if an error is authentication-related based on code or message content.
+    """
+    msg_lower = error_message.lower()
+    return error_code in (401, 403) or "auth" in msg_lower or "api key" in msg_lower
+
 def handle_account_failure(
     conn: sqlite3.Connection,
     account_id: str,
@@ -140,7 +147,7 @@ def handle_account_failure(
     """
     Classify error and trigger appropriate state transitions for an account.
     """
-    if error_code in (401, 403) or "auth" in error_message.lower() or "api key" in error_message.lower():
+    if is_auth_error(error_code, error_message):
         transition_account_state(conn, account_id, "disabled", actor,
                                  f"Auth Error ({error_code}): {error_message}", raw_response)
     elif error_code == 429 or "429" in error_message or "rate limit" in error_message.lower():
@@ -166,7 +173,7 @@ def handle_endpoint_failure(
     """
     Classify error and trigger appropriate state transitions for an endpoint.
     """
-    if error_code in (401, 403) or "auth" in error_message.lower() or "api key" in error_message.lower():
+    if is_auth_error(error_code, error_message):
         transition_endpoint_state(conn, endpoint_id, "disabled", actor,
                                   f"Auth Error ({error_code}): {error_message}", raw_response)
     elif error_code == 429 or "429" in error_message or "rate limit" in error_message.lower():
@@ -190,9 +197,17 @@ def handle_account_success(conn: sqlite3.Connection, account_id: str, actor: str
     NOT short-circuit a cooldown timer.
     """
     acc = store.get_account(conn, account_id)
-    if acc and acc.status in ("degraded", "probe", "recovered"):
+    if not acc:
+        return
+
+    if acc.status == "probe":
+        if actor == "probe":
+            transition_account_state(conn, account_id, "active", actor, "Probe success")
+        else:
+            logger.debug(f"Ignored straggler success callback for account {account_id} currently in probe state.")
+    elif acc.status in ("degraded", "recovered"):
         transition_account_state(conn, account_id, "active", actor, "Success signal received")
-    elif acc and acc.failure_count > 0 and acc.status == "active":
+    elif acc.status == "active" and acc.failure_count > 0:
         conn.execute("UPDATE accounts SET failure_count = 0 WHERE id = ?", (account_id,))
 
 def handle_endpoint_success(conn: sqlite3.Connection, endpoint_id: str, actor: str) -> None:
@@ -204,8 +219,16 @@ def handle_endpoint_success(conn: sqlite3.Connection, endpoint_id: str, actor: s
     NOT short-circuit a cooldown timer.
     """
     ep = store.get_endpoint(conn, endpoint_id)
-    if ep and ep.status in ("degraded", "probe", "recovered"):
+    if not ep:
+        return
+
+    if ep.status == "probe":
+        if actor == "probe":
+            transition_endpoint_state(conn, endpoint_id, "active", actor, "Probe success")
+        else:
+            logger.debug(f"Ignored straggler success callback for endpoint {endpoint_id} currently in probe state.")
+    elif ep.status in ("degraded", "recovered"):
         transition_endpoint_state(conn, endpoint_id, "active", actor, "Success signal received")
-    elif ep and ep.failure_count > 0 and ep.status == "active":
+    elif ep.status == "active" and ep.failure_count > 0:
         conn.execute("UPDATE endpoints SET failure_count = 0 WHERE id = ?", (endpoint_id,))
 

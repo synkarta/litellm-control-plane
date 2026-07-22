@@ -7,7 +7,8 @@ from src.health.state_machine import (
     handle_account_failure,
     handle_endpoint_failure,
     handle_account_success,
-    handle_endpoint_success
+    handle_endpoint_success,
+    is_auth_error
 )
 
 logger = logging.getLogger("event_ingestion")
@@ -115,14 +116,14 @@ def ingest_event_callback(
             # - No endpoint context: fall back to account-level handling so we don't
             #   silently drop events that only carry account metadata.
 
-            is_auth_error = error_code in (401, 403)
+            auth_failed = is_auth_error(error_code, error_msg)
 
             if endpoint_id:
                 handle_endpoint_failure(conn, endpoint_id, error_code, error_msg,
                                         actor="callback-ingest", raw_response=raw_response)
 
             if account_id:
-                if is_auth_error:
+                if auth_failed:
                     handle_account_failure(conn, account_id, error_code, error_msg,
                                           actor="callback-ingest", raw_response=raw_response)
                 elif not endpoint_id:

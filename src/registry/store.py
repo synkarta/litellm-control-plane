@@ -257,15 +257,19 @@ def update_account_status(
     if not old:
         return None
     
+    before_dict = old.model_dump()
+    after_dict = {**before_dict, "status": status}
+    
     if status == "active":
         conn.execute("UPDATE accounts SET status = ?, cooldown_until = NULL, failure_count = 0 WHERE id = ?", (status, account_id))
+        after_dict["cooldown_until"] = None
+        after_dict["failure_count"] = 0
     else:
         conn.execute("UPDATE accounts SET status = ? WHERE id = ?", (status, account_id))
-    new = get_account(conn, account_id)
-    assert new is not None
-    diff = {"before": old.model_dump(), "after": new.model_dump()}
+
+    diff = {"before": before_dict, "after": after_dict}
     log_audit(conn, actor, "update_status", "account", account_id, diff, reason)
-    return new
+    return Account.model_validate(after_dict)
 
 def delete_account(conn: sqlite3.Connection, account_id: str, actor: str, reason: Optional[str] = None) -> bool:
     account = get_account(conn, account_id)
@@ -356,21 +360,25 @@ def update_endpoint_status(
     new_status = status if status is not None else old.status
     new_override = manual_override if manual_override is not None else old.manual_override
     
+    before_dict = old.model_dump()
+    after_dict = {**before_dict, "status": new_status, "manual_override": new_override}
+    
     if new_status == "active":
         conn.execute(
             "UPDATE endpoints SET status = ?, manual_override = ?, cooldown_until = NULL, failure_count = 0 WHERE id = ?",
             (new_status, new_override, endpoint_id)
         )
+        after_dict["cooldown_until"] = None
+        after_dict["failure_count"] = 0
     else:
         conn.execute(
             "UPDATE endpoints SET status = ?, manual_override = ? WHERE id = ?",
             (new_status, new_override, endpoint_id)
         )
-    new = get_endpoint(conn, endpoint_id)
-    assert new is not None
-    diff = {"before": old.model_dump(), "after": new.model_dump()}
+
+    diff = {"before": before_dict, "after": after_dict}
     log_audit(conn, actor, "update_status", "endpoint", endpoint_id, diff, reason)
-    return new
+    return Endpoint.model_validate(after_dict)
 
 def delete_endpoint(conn: sqlite3.Connection, endpoint_id: str, actor: str, reason: Optional[str] = None) -> bool:
     endpoint = get_endpoint(conn, endpoint_id)
@@ -568,14 +576,17 @@ def set_account_cooldown(
     old = get_account(conn, account_id)
     if not old:
         return None
+        
+    before_dict = old.model_dump()
+    after_dict = {**before_dict, "status": "cooldown", "cooldown_until": cooldown_until}
+    
     conn.execute(
         "UPDATE accounts SET status = 'cooldown', cooldown_until = ? WHERE id = ?",
         (cooldown_until, account_id)
     )
-    new = get_account(conn, account_id)
-    assert new is not None
-    log_audit(conn, actor, "update_status", "account", account_id, {"before": old.model_dump(), "after": new.model_dump()}, reason)
-    return new
+    diff = {"before": before_dict, "after": after_dict}
+    log_audit(conn, actor, "update_status", "account", account_id, diff, reason)
+    return Account.model_validate(after_dict)
 
 def set_endpoint_cooldown(
     conn: sqlite3.Connection,
@@ -587,14 +598,17 @@ def set_endpoint_cooldown(
     old = get_endpoint(conn, endpoint_id)
     if not old:
         return None
+        
+    before_dict = old.model_dump()
+    after_dict = {**before_dict, "status": "cooldown", "cooldown_until": cooldown_until}
+    
     conn.execute(
         "UPDATE endpoints SET status = 'cooldown', cooldown_until = ? WHERE id = ?",
         (cooldown_until, endpoint_id)
     )
-    new = get_endpoint(conn, endpoint_id)
-    assert new is not None
-    log_audit(conn, actor, "update_status", "endpoint", endpoint_id, {"before": old.model_dump(), "after": new.model_dump()}, reason)
-    return new
+    diff = {"before": before_dict, "after": after_dict}
+    log_audit(conn, actor, "update_status", "endpoint", endpoint_id, diff, reason)
+    return Endpoint.model_validate(after_dict)
 
 def increment_account_failure(conn: sqlite3.Connection, account_id: str) -> int:
     conn.execute("UPDATE accounts SET failure_count = failure_count + 1 WHERE id = ?", (account_id,))
