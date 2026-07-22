@@ -806,5 +806,70 @@ def list_rollouts(conn: sqlite3.Connection, node_id: Optional[str] = None) -> Li
         cursor = conn.execute("SELECT * FROM rollouts ORDER BY timestamp DESC")
     return [Rollout.model_validate(dict(row)) for row in cursor.fetchall()]
 
+def get_unified_timeline(conn: sqlite3.Connection, limit: int = 100) -> List[Dict[str, Any]]:
+    timeline = []
+
+    # 1. Audit logs
+    logs = list_audit_logs(conn, limit)
+    for log in logs:
+        timeline.append({
+            "event_type": "audit",
+            "id": str(log["id"]),
+            "timestamp": log["timestamp"],
+            "actor": log["actor"],
+            "action": log["action"],
+            "target_type": log["target_type"],
+            "target_id": log["target_id"],
+            "details": {
+                "changes": log["changes"],
+                "reason": log["reason"]
+            }
+        })
+
+    # 2. Incidents
+    incidents = list_incidents(conn, limit=limit)
+    for inc in incidents:
+        timeline.append({
+            "event_type": "incident",
+            "id": inc["id"],
+            "timestamp": inc["timestamp"],
+            "actor": "system",
+            "action": "state_transition",
+            "target_type": inc["target_type"],
+            "target_id": inc["target_id"],
+            "details": {
+                "state_from": inc["state_from"],
+                "state_to": inc["state_to"],
+                "reason": inc["reason"],
+                "raw_response": inc["raw_response"]
+            }
+        })
+
+    # 3. Rollouts
+    cursor = conn.execute(
+        "SELECT id, node_id, config_version, status, error_message, timestamp FROM rollouts ORDER BY timestamp DESC LIMIT ?",
+        (limit,)
+    )
+    for row in cursor.fetchall():
+        r = dict(row)
+        timeline.append({
+            "event_type": "rollout",
+            "id": r["id"],
+            "timestamp": r["timestamp"],
+            "actor": "rollout-orchestrator",
+            "action": f"deploy_{r['status']}",
+            "target_type": "node",
+            "target_id": r["node_id"],
+            "details": {
+                "config_version": r["config_version"],
+                "status": r["status"],
+                "error_message": r["error_message"]
+            }
+        })
+
+    # Sort all by timestamp descending
+    timeline.sort(key=lambda x: x["timestamp"], reverse=True)
+    return timeline[:limit]
+
 
 

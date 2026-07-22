@@ -93,6 +93,52 @@ def ingest_event_callback(
         # Check if failed or success
         is_failure = "error" in item or "exception" in item or item.get("status") == "failed"
 
+        # Record metrics
+        try:
+            from src.metrics.pipeline import REQUESTS_TOTAL, REQUEST_LATENCY_SECONDS, TOKENS_TOTAL
+            from src.registry import store
+            
+            status_label = "success"
+            if is_failure:
+                error_code, _ = classify_error(item)
+                status_label = str(error_code)
+
+            node_id = meta.get("node_id")
+            if not node_id and endpoint_id:
+                ep = store.get_endpoint(conn, endpoint_id)
+                if ep:
+                    node_id = ep.node_id
+            node_id = node_id or "unknown"
+
+            REQUESTS_TOTAL.labels(
+                node_id=node_id,
+                account_id=account_id or "unknown",
+                endpoint_id=endpoint_id or "unknown",
+                status=status_label
+            ).inc()
+
+            latency = item.get("response_time")
+            if latency is not None:
+                REQUEST_LATENCY_SECONDS.labels(
+                    node_id=node_id,
+                    account_id=account_id or "unknown",
+                    endpoint_id=endpoint_id or "unknown"
+                ).observe(float(latency))
+
+            usage = item.get("usage")
+            if isinstance(usage, dict):
+                for token_type in ["prompt_tokens", "completion_tokens", "total_tokens"]:
+                    val = usage.get(token_type)
+                    if val is not None:
+                        TOKENS_TOTAL.labels(
+                            node_id=node_id,
+                            account_id=account_id or "unknown",
+                            endpoint_id=endpoint_id or "unknown",
+                            token_type=token_type.replace("_tokens", "")
+                        ).inc(int(val))
+        except Exception as me:
+            logger.error(f"Failed to record metrics: {me}")
+
         if is_failure:
             error_code, error_msg = classify_error(item)
             raw_response = extract_raw_response(item)

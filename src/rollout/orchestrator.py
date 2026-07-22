@@ -16,6 +16,7 @@ logger = logging.getLogger("rollout_orchestrator")
 class RolloutOrchestrator:
     def __init__(self, generator: ConfigGenerator):
         self.generator = generator
+        self.node_config_paths: Dict[str, str] = {}
 
     def deploy_config(
         self,
@@ -74,6 +75,7 @@ class RolloutOrchestrator:
 
         # 4. Apply (Write new config to disk)
         try:
+            self.node_config_paths[node_id] = config_filepath
             store.update_rollout_status(conn, rollout_id, "applying")
             os.makedirs(os.path.dirname(os.path.abspath(config_filepath)), exist_ok=True)
             with open(config_filepath, "w", encoding="utf-8") as f:
@@ -209,4 +211,95 @@ class RolloutOrchestrator:
             "missing_keys": missing_keys,
             "orphaned_keys": orphaned_keys,
             "drift_detected": stale_config or has_key_drift
+        }
+
+    def reconcile_node(
+        self,
+        conn: sqlite3.Connection,
+        node_id: str,
+        config_filepath: Optional[str] = None,
+        timeout_sec: float = 10.0,
+        mock_adapter: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Detect config and key drift for a node, and automatically re-align it
+        with the desired control plane state.
+        """
+        path = config_filepath or self.node_config_paths.get(node_id)
+        if not path:
+            return {"reconciled": False, "reason": "No config path registered for this node yet."}
+
+        drift = self.detect_drift(conn, node_id, path)
+        if not drift["drift_detected"]:
+            return {"reconciled": False, "reason": "No drift detected"}
+
+        logger.info(f"Drift detected on node {node_id}. Initiating auto-reconciliation. Drift details: {drift}")
+
+        # Increment Prometheus metric
+        try:
+            from src.metrics.pipeline import DRIFT_DETECTION_TOTAL
+            DRIFT_DETECTION_TOTAL.labels(node_id=node_id).inc()
+        except Exception as me:
+            logger.error(f"Failed to record drift detection metric: {me}")
+
+        # Audit drift event
+        store.log_audit(
+            conn,
+            actor="reconcile-worker",
+            action="drift_detected",
+            target_type="node",
+            target_id=node_id,
+            changes=drift,
+            reason="Periodic drift detection check"
+        )
+
+        reconciled_config = False
+        reconciled_keys = False
+
+        # 1. Resolve Config Drift
+        if drift["config_drift"]:
+            try:
+                logger.info(f"Reconciling config drift for node {node_id}...")
+                self.deploy_config(conn, node_id, config_filepath, timeout_sec=timeout_sec, mock_adapter=mock_adapter)
+                reconciled_config = True
+            except Exception as e:
+                logger.error(f"Failed to reconcile config drift for node {node_id}: {e}")
+
+        # 2. Resolve Key Drift
+        if drift["key_drift"]:
+            try:
+                from src.registry import key_manager
+                from src.registry.key_manager import _PENDING_KEY_PREFIX
+                
+                # Sync missing keys
+                for cid in drift["missing_keys"]:
+                    logger.info(f"Reconciling missing key for consumer {cid} on node {node_id}...")
+                    key_manager.sync_consumer_to_all_nodes(conn, cid)
+                
+                # Revoke and delete orphaned keys
+                for cid in drift["orphaned_keys"]:
+                    logger.info(f"Reconciling orphaned key for consumer {cid} on node {node_id}...")
+                    key = store.get_consumer_key(conn, cid, node_id)
+                    if key:
+                        is_placeholder = key.virtual_key.startswith(_PENDING_KEY_PREFIX) or key.status == "pending-sync"
+                        if not is_placeholder:
+                            node = store.get_node(conn, node_id)
+                            if node:
+                                master_key = get_node_master_key(node.id)
+                                url = get_node_url(node.host, node.port)
+                                adapter = LiteLLMAdapter(url, master_key)
+                                try:
+                                    adapter.delete_key(key.virtual_key)
+                                except Exception as err:
+                                    logger.warning(f"Failed to revoke orphaned key {key.virtual_key} on node {node_id}: {err}")
+                        store.delete_consumer_key(conn, cid, node_id, actor="reconcile-worker", reason="orphaned key cleanup")
+                reconciled_keys = True
+            except Exception as e:
+                logger.error(f"Failed to reconcile key drift for node {node_id}: {e}")
+
+        return {
+            "reconciled": True,
+            "reconciled_config": reconciled_config,
+            "reconciled_keys": reconciled_keys,
+            "drift_details": drift
         }

@@ -27,7 +27,8 @@ dependencies = [
     "email-validator",
     "fastapi-sso",
     "redis",
-    "pyyaml>=6.0"
+    "pyyaml>=6.0",
+    "prometheus-client>=0.17.0"
 ]
 
 [project.optional-dependencies]

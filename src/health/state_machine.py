@@ -36,6 +36,17 @@ def transition_account_state(
     logger.info(msg)
     print(msg)  # Explicit stdout logging
 
+    try:
+        from src.metrics.pipeline import HEALTH_EVENTS_TOTAL
+        HEALTH_EVENTS_TOTAL.labels(
+            entity_type="account",
+            entity_id=account_id,
+            state_from=old_state,
+            state_to=next_state
+        ).inc()
+    except Exception as me:
+        logger.error(f"Failed to record health event metric: {me}")
+
     # Record in incidents table
     store.create_incident(conn, "account", account_id, old_state, next_state, reason, raw_response)
 
@@ -72,6 +83,17 @@ def transition_endpoint_state(
     msg = f"[Endpoint] [{endpoint_id}] State Transition: {old_state} -> {next_state} (Reason: {reason or 'N/A'})"
     logger.info(msg)
     print(msg)  # Explicit stdout logging
+
+    try:
+        from src.metrics.pipeline import HEALTH_EVENTS_TOTAL
+        HEALTH_EVENTS_TOTAL.labels(
+            entity_type="endpoint",
+            entity_id=endpoint_id,
+            state_from=old_state,
+            state_to=next_state
+        ).inc()
+    except Exception as me:
+        logger.error(f"Failed to record health event metric: {me}")
 
     # Record in incidents table
     store.create_incident(conn, "endpoint", endpoint_id, old_state, next_state, reason, raw_response)

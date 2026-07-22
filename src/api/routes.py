@@ -326,6 +326,17 @@ def health_incidents(
         state_to=state_to,
     )
 
+@router.get("/timeline", tags=["health"])
+def unified_timeline(
+    limit: int = Query(100, ge=1, le=1000),
+    conn = Depends(get_db_dep)
+):
+    """
+    Retrieve unified timeline of health incidents, audit logs, and rollout events.
+    Returns events sorted in chronological order.
+    """
+    return store.get_unified_timeline(conn, limit=limit)
+
 # L3: Per-entity health detail endpoints for operator drill-down
 
 @router.get("/health/accounts/{id}", tags=["health"])
@@ -473,9 +484,9 @@ from src.secrets.doppler import DopplerResolver
 from src.config.generator import ConfigGenerator
 from src.rollout.orchestrator import RolloutOrchestrator
 
-_resolver = DopplerResolver()
-_generator = ConfigGenerator(_resolver)
-_orchestrator = RolloutOrchestrator(_generator)
+resolver = DopplerResolver()
+generator = ConfigGenerator(resolver)
+orchestrator = RolloutOrchestrator(generator)
 
 @router.post("/rollouts/deploy/{node_id}", response_model=Rollout, tags=["rollouts"])
 def deploy_config(
@@ -485,7 +496,7 @@ def deploy_config(
     conn = Depends(get_db_dep)
 ):
     try:
-        res = _orchestrator.deploy_config(
+        res = orchestrator.deploy_config(
             conn=conn,
             node_id=node_id,
             config_filepath=config_filepath,
@@ -513,7 +524,7 @@ def detect_drift(
     conn = Depends(get_db_dep)
 ):
     try:
-        return _orchestrator.detect_drift(conn, node_id, config_filepath)
+        return orchestrator.detect_drift(conn, node_id, config_filepath)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
