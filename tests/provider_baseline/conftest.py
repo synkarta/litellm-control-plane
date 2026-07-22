@@ -148,6 +148,7 @@ def litellm_proxy_url():
     log_file = open(log_file_path, "w", encoding="utf-8")
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
+    env.pop("LITELLM_MASTER_KEY", None)
     process = subprocess.Popen(
         cmd,
         stdout=log_file,

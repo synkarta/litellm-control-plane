@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import hashlib
 import time
 from typing import Dict, Optional, Tuple
 import httpx
@@ -88,14 +89,15 @@ class DopplerResolver:
         Gets secrets dict for token, utilizing caching.
         """
         now = time.time()
-        if token in self._cache:
-            fetch_time, secrets = self._cache[token]
+        cache_key = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        if cache_key in self._cache:
+            fetch_time, secrets = self._cache[cache_key]
             if now - fetch_time < self.cache_ttl:
                 return secrets
                 
         # Cache miss or expired
         secrets = self._fetch_secrets_from_doppler(token)
-        self._cache[token] = (now, secrets)
+        self._cache[cache_key] = (now, secrets)
         return secrets
 
     def resolve(self, uri: str) -> str:

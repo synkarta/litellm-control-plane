@@ -9,7 +9,9 @@ from src.registry.models import (
     Account, AccountCreate,
     Endpoint, EndpointCreate,
     Consumer, ConsumerCreate, ConsumerUpdate,
-    ConsumerKey, ConsumerKeyCreate
+    ConsumerKey, ConsumerKeyCreate,
+    PolicyProfile, PolicyProfileCreate, PolicyProfileUpdate,
+    Rollout
 )
 
 # --- Nodes Store ---
@@ -269,7 +271,7 @@ def update_account_status(
 
     diff = {"before": before_dict, "after": after_dict}
     log_audit(conn, actor, "update_status", "account", account_id, diff, reason)
-    return Account.model_validate(after_dict)
+    return get_account(conn, account_id)
 
 def delete_account(conn: sqlite3.Connection, account_id: str, actor: str, reason: Optional[str] = None) -> bool:
     account = get_account(conn, account_id)
@@ -378,7 +380,7 @@ def update_endpoint_status(
 
     diff = {"before": before_dict, "after": after_dict}
     log_audit(conn, actor, "update_status", "endpoint", endpoint_id, diff, reason)
-    return Endpoint.model_validate(after_dict)
+    return get_endpoint(conn, endpoint_id)
 
 def delete_endpoint(conn: sqlite3.Connection, endpoint_id: str, actor: str, reason: Optional[str] = None) -> bool:
     endpoint = get_endpoint(conn, endpoint_id)
@@ -413,8 +415,8 @@ def create_consumer(conn: sqlite3.Connection, consumer: ConsumerCreate, actor: s
     try:
         conn.execute(
             """
-            INSERT INTO consumers (id, name, max_budget, rate_limit_rpm, rate_limit_tpm, status)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO consumers (id, name, max_budget, rate_limit_rpm, rate_limit_tpm, status, profile_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 consumer.id,
@@ -422,7 +424,8 @@ def create_consumer(conn: sqlite3.Connection, consumer: ConsumerCreate, actor: s
                 consumer.max_budget,
                 consumer.rate_limit_rpm,
                 consumer.rate_limit_tpm,
-                consumer.status
+                consumer.status,
+                consumer.profile_id
             )
         )
         created = get_consumer(conn, consumer.id)
@@ -455,14 +458,17 @@ def update_consumer(
     fields = update.model_dump(exclude_none=True)
     if not fields:
         return old
+    
+    before_dict = old.model_dump()
+    after_dict = {**before_dict, **fields}
+
     set_clause = ", ".join(f"{k} = ?" for k in fields)
     values = list(fields.values()) + [consumer_id]
     conn.execute(f"UPDATE consumers SET {set_clause} WHERE id = ?", values)
-    new = get_consumer(conn, consumer_id)
-    assert new is not None
-    diff = {"before": old.model_dump(), "after": new.model_dump()}
+    
+    diff = {"before": before_dict, "after": after_dict}
     log_audit(conn, actor, "update", "consumer", consumer_id, diff, reason)
-    return new
+    return get_consumer(conn, consumer_id)
 
 def delete_consumer(conn: sqlite3.Connection, consumer_id: str, actor: str, reason: Optional[str] = None) -> bool:
     consumer = get_consumer(conn, consumer_id)
@@ -523,15 +529,16 @@ def update_consumer_key_status(
     old = get_consumer_key(conn, consumer_id, node_id)
     if not old:
         return None
+    before_dict = old.model_dump()
+    after_dict = {**before_dict, "status": status}
+    
     conn.execute(
         "UPDATE consumer_keys SET status = ? WHERE consumer_id = ? AND node_id = ?",
         (status, consumer_id, node_id)
     )
-    new = get_consumer_key(conn, consumer_id, node_id)
-    assert new is not None
-    diff = {"before": old.model_dump(), "after": new.model_dump()}
+    diff = {"before": before_dict, "after": after_dict}
     log_audit(conn, actor, "update_key_status", "consumer_key", f"{consumer_id}:{node_id}", diff, reason)
-    return new
+    return get_consumer_key(conn, consumer_id, node_id)
 
 def update_consumer_key(
     conn: sqlite3.Connection,
@@ -546,15 +553,16 @@ def update_consumer_key(
     old = get_consumer_key(conn, consumer_id, node_id)
     if not old:
         return None
+    before_dict = old.model_dump()
+    after_dict = {**before_dict, "virtual_key": virtual_key, "status": status}
+    
     conn.execute(
         "UPDATE consumer_keys SET virtual_key = ?, status = ? WHERE consumer_id = ? AND node_id = ?",
         (virtual_key, status, consumer_id, node_id)
     )
-    new = get_consumer_key(conn, consumer_id, node_id)
-    assert new is not None
-    diff = {"before": old.model_dump(), "after": new.model_dump()}
+    diff = {"before": before_dict, "after": after_dict}
     log_audit(conn, actor, "update_key", "consumer_key", f"{consumer_id}:{node_id}", diff, reason)
-    return new
+    return get_consumer_key(conn, consumer_id, node_id)
 
 def delete_consumer_key(conn: sqlite3.Connection, consumer_id: str, node_id: str, actor: str, reason: Optional[str] = None) -> bool:
     key = get_consumer_key(conn, consumer_id, node_id)
@@ -586,7 +594,7 @@ def set_account_cooldown(
     )
     diff = {"before": before_dict, "after": after_dict}
     log_audit(conn, actor, "update_status", "account", account_id, diff, reason)
-    return Account.model_validate(after_dict)
+    return get_account(conn, account_id)
 
 def set_endpoint_cooldown(
     conn: sqlite3.Connection,
@@ -608,7 +616,7 @@ def set_endpoint_cooldown(
     )
     diff = {"before": before_dict, "after": after_dict}
     log_audit(conn, actor, "update_status", "endpoint", endpoint_id, diff, reason)
-    return Endpoint.model_validate(after_dict)
+    return get_endpoint(conn, endpoint_id)
 
 def increment_account_failure(conn: sqlite3.Connection, account_id: str) -> int:
     conn.execute("UPDATE accounts SET failure_count = failure_count + 1 WHERE id = ?", (account_id,))
@@ -668,5 +676,135 @@ def list_incidents(
         params
     )
     return [dict(row) for row in cursor.fetchall()]
+
+# --- Policy Profiles Store ---
+
+def create_policy_profile(
+    conn: sqlite3.Connection,
+    profile: PolicyProfileCreate,
+    actor: str,
+    reason: Optional[str] = None
+) -> PolicyProfile:
+    try:
+        conn.execute(
+            """
+            INSERT INTO policy_profiles (id, name, allowed_model_groups, description)
+            VALUES (?, ?, ?, ?)
+            """,
+            (profile.id, profile.name, profile.allowed_model_groups, profile.description)
+        )
+        created = get_policy_profile(conn, profile.id)
+        assert created is not None
+        log_audit(conn, actor, "create", "policy_profile", profile.id, created.model_dump(), reason)
+        return created
+    except sqlite3.IntegrityError as e:
+        raise ValueError(f"PolicyProfile already exists or constraint failed: {e}")
+
+def get_policy_profile(conn: sqlite3.Connection, profile_id: str) -> Optional[PolicyProfile]:
+    row = conn.execute("SELECT * FROM policy_profiles WHERE id = ?", (profile_id,)).fetchone()
+    if row:
+        return PolicyProfile.model_validate(dict(row))
+    return None
+
+def list_policy_profiles(conn: sqlite3.Connection) -> List[PolicyProfile]:
+    cursor = conn.execute("SELECT * FROM policy_profiles")
+    return [PolicyProfile.model_validate(dict(row)) for row in cursor.fetchall()]
+
+def update_policy_profile(
+    conn: sqlite3.Connection,
+    profile_id: str,
+    update: PolicyProfileUpdate,
+    actor: str,
+    reason: Optional[str] = None
+) -> Optional[PolicyProfile]:
+    old = get_policy_profile(conn, profile_id)
+    if not old:
+        return None
+    fields = update.model_dump(exclude_none=True)
+    if not fields:
+        return old
+    
+    before_dict = old.model_dump()
+    after_dict = {**before_dict, **fields}
+
+    set_clause = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values()) + [profile_id]
+    conn.execute(f"UPDATE policy_profiles SET {set_clause} WHERE id = ?", values)
+    
+    diff = {"before": before_dict, "after": after_dict}
+    log_audit(conn, actor, "update", "policy_profile", profile_id, diff, reason)
+    return get_policy_profile(conn, profile_id)
+
+def delete_policy_profile(conn: sqlite3.Connection, profile_id: str, actor: str, reason: Optional[str] = None) -> bool:
+    profile = get_policy_profile(conn, profile_id)
+    if not profile:
+        return False
+    # Check if any consumer is referencing this profile
+    cursor = conn.execute("SELECT COUNT(*) FROM consumers WHERE profile_id = ?", (profile_id,))
+    if cursor.fetchone()[0] > 0:
+        raise ValueError("Cannot delete policy profile; it is referenced by active consumers.")
+        
+    conn.execute("DELETE FROM policy_profiles WHERE id = ?", (profile_id,))
+    log_audit(conn, actor, "delete", "policy_profile", profile_id, profile.model_dump(), reason)
+    return True
+
+# --- Rollouts Store ---
+
+def create_rollout(
+    conn: sqlite3.Connection,
+    rollout_id: str,
+    node_id: str,
+    config_version: str,
+    status: str,
+    config_content: str,
+    error_message: Optional[str] = None
+) -> Rollout:
+    conn.execute(
+        """
+        INSERT INTO rollouts (id, node_id, config_version, status, config_content, error_message)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (rollout_id, node_id, config_version, status, config_content, error_message)
+    )
+    row = conn.execute("SELECT * FROM rollouts WHERE id = ?", (rollout_id,)).fetchone()
+    return Rollout.model_validate(dict(row))
+
+def update_rollout_status(
+    conn: sqlite3.Connection,
+    rollout_id: str,
+    status: str,
+    error_message: Optional[str] = None
+) -> Optional[Rollout]:
+    conn.execute(
+        "UPDATE rollouts SET status = ?, error_message = ? WHERE id = ?",
+        (status, error_message, rollout_id)
+    )
+    row = conn.execute("SELECT * FROM rollouts WHERE id = ?", (rollout_id,)).fetchone()
+    if row:
+        return Rollout.model_validate(dict(row))
+    return None
+
+def get_rollout(conn: sqlite3.Connection, rollout_id: str) -> Optional[Rollout]:
+    row = conn.execute("SELECT * FROM rollouts WHERE id = ?", (rollout_id,)).fetchone()
+    if row:
+        return Rollout.model_validate(dict(row))
+    return None
+
+def get_latest_success_rollout(conn: sqlite3.Connection, node_id: str) -> Optional[Rollout]:
+    row = conn.execute(
+        "SELECT * FROM rollouts WHERE node_id = ? AND status = 'success' ORDER BY timestamp DESC LIMIT 1",
+        (node_id,)
+    ).fetchone()
+    if row:
+        return Rollout.model_validate(dict(row))
+    return None
+
+def list_rollouts(conn: sqlite3.Connection, node_id: Optional[str] = None) -> List[Rollout]:
+    if node_id:
+        cursor = conn.execute("SELECT * FROM rollouts WHERE node_id = ? ORDER BY timestamp DESC", (node_id,))
+    else:
+        cursor = conn.execute("SELECT * FROM rollouts ORDER BY timestamp DESC")
+    return [Rollout.model_validate(dict(row)) for row in cursor.fetchall()]
+
 
 

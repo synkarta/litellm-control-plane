@@ -112,6 +112,7 @@ class ConsumerBase(BaseModel):
     rate_limit_rpm: Optional[int] = Field(None, description="Requests per minute limit")
     rate_limit_tpm: Optional[int] = Field(None, description="Tokens per minute limit")
     status: Literal["active", "disabled"] = "active"
+    profile_id: Optional[str] = Field(None, description="Associated policy profile ID")
 
 class ConsumerCreate(ConsumerBase):
     pass
@@ -122,6 +123,7 @@ class ConsumerUpdate(BaseModel):
     rate_limit_rpm: Optional[int] = None
     rate_limit_tpm: Optional[int] = None
     status: Optional[Literal["active", "disabled"]] = None
+    profile_id: Optional[str] = None
 
 class Consumer(ConsumerBase):
     model_config = {"from_attributes": True}
@@ -137,4 +139,67 @@ class ConsumerKeyCreate(ConsumerKeyBase):
 
 class ConsumerKey(ConsumerKeyBase):
     model_config = {"from_attributes": True}
+
+# --- Policy Profile Models ---
+
+class PolicyProfileBase(BaseModel):
+    id: str = Field(..., description="Unique profile identifier, e.g. coding, general-chat")
+    name: str
+    allowed_model_groups: str = Field(..., description="JSON string list of allowed model groups, e.g. ['premium', 'general']")
+    description: Optional[str] = None
+
+    @field_validator("allowed_model_groups")
+    @classmethod
+    def validate_allowed_model_groups(cls, v: str) -> str:
+        import json
+        try:
+            parsed = json.loads(v)
+            if not isinstance(parsed, list):
+                raise ValueError("allowed_model_groups must parse as a JSON list")
+            for item in parsed:
+                if not isinstance(item, str):
+                    raise ValueError("All elements in allowed_model_groups list must be strings")
+        except json.JSONDecodeError:
+            raise ValueError("allowed_model_groups must be a valid JSON string")
+        return v
+
+class PolicyProfileCreate(PolicyProfileBase):
+    pass
+
+class PolicyProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    allowed_model_groups: Optional[str] = None
+    description: Optional[str] = None
+
+    @field_validator("allowed_model_groups")
+    @classmethod
+    def validate_allowed_model_groups(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        import json
+        try:
+            parsed = json.loads(v)
+            if not isinstance(parsed, list):
+                raise ValueError("allowed_model_groups must parse as a JSON list")
+        except json.JSONDecodeError:
+            raise ValueError("allowed_model_groups must be a valid JSON string")
+        return v
+
+class PolicyProfile(PolicyProfileBase):
+    model_config = {"from_attributes": True}
+
+# --- Rollout Models ---
+
+class RolloutBase(BaseModel):
+    id: str = Field(..., description="Unique rollout identifier")
+    node_id: str
+    config_version: str
+    status: Literal["pending", "applying", "success", "failed", "rolled_back"]
+    config_content: str
+    error_message: Optional[str] = None
+    timestamp: Optional[str] = None
+
+class Rollout(RolloutBase):
+    model_config = {"from_attributes": True}
+
 

@@ -12,7 +12,6 @@ from src.health.state_machine import (
 )
 
 logger = logging.getLogger("event_ingestion")
-router = APIRouter()
 
 def extract_raw_response(item: Dict[str, Any]) -> Optional[str]:
     """
@@ -41,7 +40,7 @@ def classify_error(item: Dict[str, Any]) -> tuple[int, str]:
     error_obj = item.get("error") or item.get("exception")
     if error_obj:
         if isinstance(error_obj, dict):
-            error_msg = error_obj.get("message") or error_obj.get("message") or str(error_obj)
+            error_msg = error_obj.get("message") or error_obj.get("error") or error_obj.get("detail") or str(error_obj)
             # Try to get status code
             code = error_obj.get("status_code") or error_obj.get("code")
             if code:
@@ -63,7 +62,6 @@ def classify_error(item: Dict[str, Any]) -> tuple[int, str]:
 
     return error_code, error_msg
 
-@router.post("/events/callback", tags=["events"])
 def ingest_event_callback(
     payload: Union[List[Dict[str, Any]], Dict[str, Any]],
     conn = Depends(get_db_dep)

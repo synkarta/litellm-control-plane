@@ -23,12 +23,7 @@ def get_node_master_key(node_id: str) -> str:
     key = os.getenv(env_name) or os.getenv("LITELLM_MASTER_KEY")
     if key:
         return key
-    logger.warning(
-        f"No master key env var found for node '{node_id}' "
-        f"(tried {env_name} and LITELLM_MASTER_KEY). "
-        f"Falling back to insecure default 'sk-1234'. Set the env var before production."
-    )
-    return "sk-1234"
+    raise RuntimeError(f"Missing master key for node '{node_id}'. Expected {env_name} or LITELLM_MASTER_KEY in environment.")
 
 def get_node_url(node_host: str, node_port: int) -> str:
     """
@@ -53,13 +48,22 @@ def get_node_url(node_host: str, node_port: int) -> str:
         host = f"http://{host}"
     return f"{host}:{node_port}"
 
-def get_consumer_models_scope(conn: sqlite3.Connection) -> List[str]:
+def get_consumer_models_scope(conn: sqlite3.Connection, consumer_id: str) -> List[str]:
     """
     Determine which logical model groups the consumer is allowed to access.
-    Returns all logical groups of models currently in the registry database.
+    Respects Policy Profiles assigned to the consumer.
     """
-    cursor = conn.execute("SELECT DISTINCT logical_group FROM models")
-    return [row["logical_group"] for row in cursor.fetchall()]
+    import json
+    consumer = store.get_consumer(conn, consumer_id)
+    if not consumer or not consumer.profile_id:
+        return []
+    profile = store.get_policy_profile(conn, consumer.profile_id)
+    if not profile:
+        return []
+    try:
+        return json.loads(profile.allowed_model_groups)
+    except Exception:
+        return []
 
 def sync_consumer_to_all_nodes(conn: sqlite3.Connection, consumer_id: str) -> None:
     """
@@ -72,7 +76,8 @@ def sync_consumer_to_all_nodes(conn: sqlite3.Connection, consumer_id: str) -> No
     # Fetch all active proxy/exit nodes
     nodes = store.list_nodes(conn)
     active_proxies = [n for n in nodes if n.status == "active" and n.role in ("proxy", "exit")]
-    allowed_models = get_consumer_models_scope(conn)
+    allowed_models = get_consumer_models_scope(conn, consumer_id)
+
 
     for node in active_proxies:
         master_key = get_node_master_key(node.id)

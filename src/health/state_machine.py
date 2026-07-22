@@ -36,9 +36,6 @@ def transition_account_state(
     logger.info(msg)
     print(msg)  # Explicit stdout logging
 
-    # Snapshot before for audit (M4: taken before the UPDATE, no re-read race)
-    before_dict = acc.model_dump()
-
     # Record in incidents table
     store.create_incident(conn, "account", account_id, old_state, next_state, reason, raw_response)
 
@@ -49,26 +46,7 @@ def transition_account_state(
         # set_account_cooldown writes its own audit; skip duplicate below
         return store.get_account(conn, account_id)
 
-    conn.execute(
-        "UPDATE accounts SET status = ?, cooldown_until = NULL WHERE id = ?",
-        (next_state, account_id)
-    )
-    if next_state == "active":
-        conn.execute("UPDATE accounts SET failure_count = 0 WHERE id = ?", (account_id,))
-
-    # Construct after-dict directly — avoids re-read race in same transaction (M4 fix)
-    after_dict = {**before_dict, "status": next_state, "cooldown_until": None}
-    if next_state == "active":
-        after_dict["failure_count"] = 0
-
-    # M1 fix: audit is written for ALL non-cooldown transitions (disabled, degraded, probe, recovered, active)
-    store.log_audit(
-        conn, actor, "update_status", "account", account_id,
-        {"before": before_dict, "after": after_dict},
-        reason
-    )
-
-    return store.get_account(conn, account_id)
+    return store.update_account_status(conn, account_id, next_state, actor=actor, reason=reason)
 
 def transition_endpoint_state(
     conn: sqlite3.Connection,
@@ -95,9 +73,6 @@ def transition_endpoint_state(
     logger.info(msg)
     print(msg)  # Explicit stdout logging
 
-    # Snapshot before for audit (M4: taken before the UPDATE, no re-read race)
-    before_dict = ep.model_dump()
-
     # Record in incidents table
     store.create_incident(conn, "endpoint", endpoint_id, old_state, next_state, reason, raw_response)
 
@@ -108,26 +83,7 @@ def transition_endpoint_state(
         # set_endpoint_cooldown writes its own audit; skip duplicate below
         return store.get_endpoint(conn, endpoint_id)
 
-    conn.execute(
-        "UPDATE endpoints SET status = ?, cooldown_until = NULL WHERE id = ?",
-        (next_state, endpoint_id)
-    )
-    if next_state == "active":
-        conn.execute("UPDATE endpoints SET failure_count = 0 WHERE id = ?", (endpoint_id,))
-
-    # Construct after-dict directly — avoids re-read race in same transaction (M4 fix)
-    after_dict = {**before_dict, "status": next_state, "cooldown_until": None}
-    if next_state == "active":
-        after_dict["failure_count"] = 0
-
-    # M1 fix: audit is written for ALL non-cooldown transitions
-    store.log_audit(
-        conn, actor, "update_status", "endpoint", endpoint_id,
-        {"before": before_dict, "after": after_dict},
-        reason
-    )
-
-    return store.get_endpoint(conn, endpoint_id)
+    return store.update_endpoint_status(conn, endpoint_id, status=next_state, manual_override=None, actor=actor, reason=reason)
 
 def is_auth_error(error_code: int, error_message: str) -> bool:
     """

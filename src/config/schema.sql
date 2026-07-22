@@ -86,8 +86,11 @@ CREATE TABLE IF NOT EXISTS consumers (
     max_budget REAL,
     rate_limit_rpm INTEGER,
     rate_limit_tpm INTEGER,
-    status TEXT NOT NULL DEFAULT 'active'
+    status TEXT NOT NULL DEFAULT 'active',
+    profile_id TEXT,
+    FOREIGN KEY (profile_id) REFERENCES policy_profiles(id) ON DELETE SET NULL
 );
+
 
 -- Consumer Keys (Virtual keys dynamically generated per consumer on each node)
 CREATE TABLE IF NOT EXISTS consumer_keys (
@@ -114,5 +117,26 @@ CREATE TABLE IF NOT EXISTS incidents (
     raw_response TEXT,         -- JSON string of raw provider error payload, if available
     timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+
+-- Policy Profiles Table
+CREATE TABLE IF NOT EXISTS policy_profiles (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    allowed_model_groups TEXT NOT NULL, -- JSON list of logical groups: e.g. ["premium", "general"]
+    description TEXT
+);
+
+-- Rollouts Table
+CREATE TABLE IF NOT EXISTS rollouts (
+    id TEXT PRIMARY KEY,
+    node_id TEXT NOT NULL,
+    config_version TEXT NOT NULL,       -- SHA-256 hash of the generated config
+    status TEXT NOT NULL,               -- 'pending', 'applying', 'success', 'failed', 'rolled_back'
+    config_content TEXT NOT NULL,       -- Full YAML configuration content
+    error_message TEXT,
+    timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+);
+
 
 

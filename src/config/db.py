@@ -20,8 +20,10 @@ def init_db(db_path: str | None = None) -> None:
 
     if db_path is None:
         db_path = get_db_path()
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=10.0)
     try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.executescript(schema_sql)
 
@@ -33,6 +35,7 @@ def init_db(db_path: str | None = None) -> None:
         _safe_add_column(conn, "accounts", "failure_count", "INTEGER DEFAULT 0")
         _safe_add_column(conn, "endpoints", "cooldown_until", "TEXT")
         _safe_add_column(conn, "endpoints", "failure_count", "INTEGER DEFAULT 0")
+        _safe_add_column(conn, "consumers", "profile_id", "TEXT")
 
         conn.commit()
     finally:
@@ -51,9 +54,11 @@ def get_db(db_path: str | None = None):
     """Context manager to yield a database connection with foreign keys enabled."""
     if db_path is None:
         db_path = get_db_path()
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=10.0)
     conn.row_factory = sqlite3.Row
     try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
         conn.execute("PRAGMA foreign_keys = ON;")
         yield conn
         conn.commit()

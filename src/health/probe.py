@@ -149,7 +149,7 @@ class ProbeEngine:
             )
             # Find any non-disabled endpoint associated with this account to probe through
             row = conn.execute(
-                "SELECT id FROM endpoints WHERE account_id = ? AND status NOT IN ('disabled') LIMIT 1",
+                "SELECT id FROM endpoints WHERE account_id = ? AND status NOT IN ('disabled', 'cooldown', 'probe') LIMIT 1",
                 (acc_id,)
             ).fetchone()
             if row:

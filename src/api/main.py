@@ -7,6 +7,10 @@ from fastapi.security.api_key import APIKeyHeader
 from src.config.db import init_db, get_db
 from src.api import routes
 
+ADMIN_KEY = os.getenv("CONTROL_PLANE_ADMIN_KEY")
+if not ADMIN_KEY:
+    raise RuntimeError("CONTROL_PLANE_ADMIN_KEY environment variable is required")
+
 logger = logging.getLogger("main")
 
 async def _reconcile_loop(interval_sec: int = 30) -> None:
@@ -22,7 +26,7 @@ async def _reconcile_loop(interval_sec: int = 30) -> None:
         await asyncio.sleep(interval_sec)
         try:
             with get_db() as conn:
-                engine.reconcile_cooldowns(conn, actor="reconcile-worker")
+                await asyncio.to_thread(engine.reconcile_cooldowns, conn, "reconcile-worker")
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -57,8 +61,7 @@ api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
 def get_api_key(api_key: str = Security(api_key_header)):
     """Validate incoming X-Admin-API-Key header against the configuration."""
-    expected_key = os.getenv("CONTROL_PLANE_ADMIN_KEY", "admin-api-key-123")
-    if not api_key or api_key != expected_key:
+    if not api_key or api_key != ADMIN_KEY:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials"

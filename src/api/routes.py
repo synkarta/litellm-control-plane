@@ -9,7 +9,9 @@ from src.registry.models import (
     Account, AccountCreate,
     Endpoint, EndpointCreate,
     Consumer, ConsumerCreate, ConsumerUpdate,
-    ConsumerKey
+    ConsumerKey,
+    PolicyProfile, PolicyProfileCreate, PolicyProfileUpdate,
+    Rollout
 )
 from src.health import manager as health_manager
 from src.events import ingestion
@@ -415,3 +417,103 @@ def enable_endpoint(
         actor=actor, reason="Manual re-enable by operator"
     )
     return updated
+
+# --- Policy Profiles Endpoints ---
+
+@router.post("/registry/policies", response_model=PolicyProfile, tags=["policies"])
+def create_policy_profile(
+    profile: PolicyProfileCreate,
+    actor: str = Depends(get_actor),
+    conn = Depends(get_db_dep)
+):
+    try:
+        return store.create_policy_profile(conn, profile, actor=actor)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+@router.get("/registry/policies", response_model=List[PolicyProfile], tags=["policies"])
+def list_policy_profiles(conn = Depends(get_db_dep)):
+    return store.list_policy_profiles(conn)
+
+@router.get("/registry/policies/{id}", response_model=PolicyProfile, tags=["policies"])
+def get_policy_profile(id: str, conn = Depends(get_db_dep)):
+    profile = store.get_policy_profile(conn, id)
+    if not profile:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Policy profile not found")
+    return profile
+
+@router.patch("/registry/policies/{id}", response_model=PolicyProfile, tags=["policies"])
+def update_policy_profile(
+    id: str,
+    update: PolicyProfileUpdate,
+    actor: str = Depends(get_actor),
+    conn = Depends(get_db_dep)
+):
+    profile = store.update_policy_profile(conn, id, update, actor=actor)
+    if not profile:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Policy profile not found")
+    return profile
+
+@router.delete("/registry/policies/{id}", tags=["policies"])
+def delete_policy_profile(
+    id: str,
+    actor: str = Depends(get_actor),
+    conn = Depends(get_db_dep)
+):
+    try:
+        if not store.delete_policy_profile(conn, id, actor=actor):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Policy profile not found")
+        return {"detail": "Policy profile deleted"}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+# --- Rollouts & Drift Endpoints ---
+
+from src.secrets.doppler import DopplerResolver
+from src.config.generator import ConfigGenerator
+from src.rollout.orchestrator import RolloutOrchestrator
+
+_resolver = DopplerResolver()
+_generator = ConfigGenerator(_resolver)
+_orchestrator = RolloutOrchestrator(_generator)
+
+@router.post("/rollouts/deploy/{node_id}", response_model=Rollout, tags=["rollouts"])
+def deploy_config(
+    node_id: str,
+    config_filepath: str = Query(..., description="Target file path on disk to write the config to"),
+    timeout_sec: float = Query(10.0, description="Verification timeout in seconds"),
+    conn = Depends(get_db_dep)
+):
+    try:
+        res = _orchestrator.deploy_config(
+            conn=conn,
+            node_id=node_id,
+            config_filepath=config_filepath,
+            timeout_sec=timeout_sec
+        )
+        # Fetch the created rollout record
+        rollout = store.get_rollout(conn, res["rollout_id"])
+        if not rollout:
+            raise HTTPException(status_code=500, detail="Rollout record not found after successful deployment")
+        return rollout
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+@router.get("/rollouts/history/{node_id}", response_model=List[Rollout], tags=["rollouts"])
+def list_rollout_history(node_id: str, conn = Depends(get_db_dep)):
+    node = store.get_node(conn, node_id)
+    if not node:
+        raise HTTPException(status_code=status.HTTP_444_NOT_FOUND if hasattr(status, "HTTP_444_NOT_FOUND") else 404, detail="Node not found")
+    return store.list_rollouts(conn, node_id=node_id)
+
+@router.get("/rollouts/drift/{node_id}", tags=["rollouts"])
+def detect_drift(
+    node_id: str,
+    config_filepath: str = Query(..., description="Disk path of the active config file"),
+    conn = Depends(get_db_dep)
+):
+    try:
+        return _orchestrator.detect_drift(conn, node_id, config_filepath)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
