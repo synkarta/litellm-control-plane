@@ -112,6 +112,12 @@ Using Docker is **completely optional** and not required for development or simp
 
 ---
 
+## LiteLLM Database & Virtual Keys
+- **Recommended Setup**: To use the dynamic Virtual Key features of the control plane (such as automatically syncing keys for `Consumers`), the managed `LiteLLM` proxy nodes should be connected to a backend database (e.g. PostgreSQL, by setting the `DATABASE_URL` environment variable on the LiteLLM nodes).
+- **Stateless/No-DB Bypass**: If your LiteLLM nodes are running in stateless mode without a database, the control plane's key-generation requests will fail, and synced keys will remain in `pending-sync` status. However, **you can still fully utilize model routing and failover**: simply use the node's static **Master Key** in the client's `Authorization` header to query the proxy, bypassing the virtual key requirement.
+
+---
+
 ## Getting Started
 
 Refer to the [deployment guide](file:///h:/litellm-control-plane/docs/deployment-guide.md) for local installation instructions.
