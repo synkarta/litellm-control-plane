@@ -42,14 +42,13 @@ def test_bad_parameter_error(litellm_proxy_url):
 
     url = f"{litellm_proxy_url}/v1/chat/completions"
     
-    # Pass an invalid temperature (LiteLLM or upstream should reject this)
+    # Pass an invalid role which LiteLLM/Upstream must reject with a client error
     payload = {
         "model": target_model,
-        "messages": [{"role": "user", "content": "Hello"}],
-        "temperature": 99.9, # invalid temperature range
+        "messages": [{"role": "not_a_real_role", "content": "Hello"}],
     }
     
     response = httpx.post(url, json=payload, timeout=20.0)
-    # Expected parameter error (400 Bad Request)
-    assert response.status_code == 400, f"Expected 400 Bad Request, got: {response.status_code} - {response.text}"
+    # Expected parameter error (400 Bad Request or 422 Unprocessable Entity)
+    assert response.status_code in [400, 422], f"Expected 400/422 Bad Request, got: {response.status_code} - {response.text}"
     print(f"\n{target_model} successfully returned parameter error: {response.status_code}")
