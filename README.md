@@ -25,6 +25,22 @@ LiteLLM itself remains the request-path execution gateway (translating providers
 - Not a financial ledger (spend logs are used as operational signals, not accounting truth).
 - Not a secret vault (secrets stay in Doppler).
 
+## Positioning & Risk Decoupling (vs. Single-Node Tools like CC Switch)
+
+While excellent tools like **CC Switch** are designed to act as single-user, local desktop proxies to route and translate requests for local CLI agents (like Claude Code), `litellm-control-plane` is designed for multi-node, distributed topologies. By integrating specialized tools like **Doppler** and **Tailscale**, it decouples several critical operational and security risks:
+
+### 1. Secret Leakage Risk (Decoupled by Doppler)
+*   **Single-Node Tools**: Typically require all API keys to be configured and stored locally on the machine executing the requests. If a node is compromised, all upstream credentials are exposed.
+*   **This System**: The control plane stores only metadata references. The actual secrets are resolved dynamically from **Doppler** and distributed under a **least-privilege scoping model**. Each inference node only receives the credentials necessary for its assigned endpoints, preventing a single compromised node from leaking keys for other regions or environments.
+
+### 2. Egress IP & Access Throttling Risk (Decoupled by Tailscale)
+*   **Single-Node Tools**: Route all requests through a single local network interface, making them vulnerable to IP-based rate limiting or geo-location blocks by upstream providers.
+*   **This System**: By routing traffic over a secure **Tailscale** mesh network, the control plane can coordinate egress paths across multiple geographical nodes (using Tailscale Exit Nodes), distributing the network footprint and bypassing localized restrictions safely.
+
+### 3. Single Point of Failure (SPOF) Risk (Decoupled by Path Isolation)
+*   **Single-Node Tools**: Combine configuration management, UI rendering, and request proxying into a single process. If the controller crashes or experiences load spikes, the request forwarding path is interrupted.
+*   **This System**: Separates the **Control Path** (configuration compilation, health monitoring) from the **Data Path** (LiteLLM request execution). The data plane nodes run autonomously using local static config copies. Even if the control plane server is offline or restarting, LiteLLM nodes continue serving requests without interruption.
+
 ## System Architecture
 
 The control plane acts as a service directory and health governor, coordinating multiple stateless LiteLLM nodes:
