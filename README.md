@@ -68,8 +68,41 @@ litellm-control-plane/
 │   ├── provider_baseline/      # Upstream compatibility validation suite
 │   └── failure_injection/      # Chaos & failover scenarios
 ├── examples/                   # Configuration & inventory examples
-└── docs/                       # Specifications, ADRs, and runbooks
+├── docs/                       # Specifications, ADRs, and runbooks
 ```
+
+## Project Documentation Index
+
+All core documentation, specifications, and recovery guides are stored in the [docs/](file:///h:/litellm-control-plane/docs/) directory. Below is a structured index of the available resources:
+
+### 🚀 Core Setup & Operations
+*   [**Getting Started Guide** (docs/getting-started.md)](file:///h:/litellm-control-plane/docs/getting-started.md): Walkthrough of Swagger API registration steps, model logical-to-physical parameter mappings, and end-to-end validation.
+*   [**Deployment Guide** (docs/deployment-guide.md)](file:///h:/litellm-control-plane/docs/deployment-guide.md): Local installation instructions, virtual environment setups, Doppler injection, and containerized deployment notes.
+*   [**FAQ** (docs/faq.md)](file:///h:/litellm-control-plane/docs/faq.md): Troubleshooting common configuration questions, stateless LiteLLM mode bypasses, and multi-node routing divisions.
+
+### 📐 Architecture & Specifications
+*   [**System Architecture** (docs/architecture.md)](file:///h:/litellm-control-plane/docs/architecture.md): Division of labor between Control Plane vs. LiteLLM Data Plane, networking topologies, and sync boundaries.
+*   [**Data Model Specification** (docs/data-model.md)](file:///h:/litellm-control-plane/docs/data-model.md): Database schemas, relationships, and lifecycle states for Nodes, Accounts, Endpoints, and Consumers.
+*   [**Policy & Routing Model** (docs/policy-model.md)](file:///h:/litellm-control-plane/docs/policy-model.md): Rules governing user access profiles, capability checks, and eligible endpoint candidates.
+*   [**Rollout Model** (docs/rollout-model.md)](file:///h:/litellm-control-plane/docs/rollout-model.md): Detailed mechanics of Desired vs. Applied state synchronization, canaries, and dry runs.
+
+### 🛡️ Security, Testing & Governance
+*   [**Access Control Matrix** (docs/access-control-matrix.md)](file:///h:/litellm-control-plane/docs/access-control-matrix.md): Roles and endpoint permissions matrix.
+*   [**Secrets Policy** (docs/secrets-policy.md)](file:///h:/litellm-control-plane/docs/secrets-policy.md): Standard practices for Doppler config layout, tokens, and key rotation.
+*   [**AI Development Rules** (docs/ai-dev-rules.md)](file:///h:/litellm-control-plane/docs/ai-dev-rules.md): Coding guidelines, logging limits, and agent coding instructions.
+*   [**Definition of Done** (docs/definition-of-done.md)](file:///h:/litellm-control-plane/docs/definition-of-done.md): Completion checklist for features, modules, and API integrations.
+*   [**Testing Strategy** (docs/testing-strategy.md)](file:///h:/litellm-control-plane/docs/testing-strategy.md): Outlines unit tests, integration tests, and chaos failure injection.
+*   [**Provider Baseline** (docs/provider-baseline.md)](file:///h:/litellm-control-plane/docs/provider-baseline.md): Test matrices to onboard new LLM providers before routing.
+
+### 🚒 Operations Runbooks
+Located in [docs/runbooks/](file:///h:/litellm-control-plane/docs/runbooks/):
+*   [**Node Bootstrap** (docs/runbooks/node-bootstrap.md)](file:///h:/litellm-control-plane/docs/runbooks/node-bootstrap.md): Step-by-step setup to provision and register a new VPS proxy node.
+*   [**Rollback Runbook** (docs/runbooks/rollback.md)](file:///h:/litellm-control-plane/docs/runbooks/rollback.md): Emergency recovery when a rollout fails or breaks routing.
+*   [**Incident 429 Cooldown** (docs/runbooks/incident-429-cooldown.md)](file:///h:/litellm-control-plane/docs/runbooks/incident-429-cooldown.md): Diagnosing and mitigating provider rate limit limits.
+*   [**LiteLLM Config Apply Failure** (docs/runbooks/litellm-config-apply-failure.md)](file:///h:/litellm-control-plane/docs/runbooks/litellm-config-apply-failure.md): Troubleshooting file-write or reload failures on remote nodes.
+*   [**Doppler Token Expired** (docs/runbooks/doppler-token-expired.md)](file:///h:/litellm-control-plane/docs/runbooks/doppler-token-expired.md): How to replace revoked or expired Doppler config tokens.
+*   [**Provider Key Rotation** (docs/runbooks/provider-key-rotation.md)](file:///h:/litellm-control-plane/docs/runbooks/provider-key-rotation.md): Procedure to cycle credentials without service interruption.
+*   [**Tailscale Exit Node Failure** (docs/runbooks/tailscale-exit-node-failure.md)](file:///h:/litellm-control-plane/docs/runbooks/tailscale-exit-node-failure.md): Diagnostic steps for private VPN tunnel disconnects.
 
 ## Cross-Platform & Deployment Options
 
