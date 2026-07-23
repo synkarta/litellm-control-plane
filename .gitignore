@@ -78,3 +78,7 @@ project_dox/
 *.db-wal
 *.db-shm
 *.db-journal
+
+# Generated LiteLLM configurations
+litellm_config_*.yaml
+config.yaml

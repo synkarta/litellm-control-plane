@@ -141,8 +141,10 @@ def test_callback_ingestion_api(populated_db):
 
     # Configure app to use temp db
     os.environ["DATABASE_URL"] = populated_db
+    # Callback endpoint uses X-Callback-Token (C2 fix)
+    os.environ["CONTROL_PLANE_CALLBACK_TOKEN"] = "callback-token-123"
     client = TestClient(app)
-    headers = {"X-Admin-API-Key": "admin-api-key-123"}
+    headers = {"X-Callback-Token": "callback-token-123"}
 
     # Post failure callback payload
     payload = {
@@ -175,8 +177,9 @@ def test_callback_ingestion_api(populated_db):
         incidents = manager.get_incidents_list(conn)
         assert len(incidents) >= 1
 
-    # Clean env var
+    # Clean env vars
     del os.environ["DATABASE_URL"]
+    del os.environ["CONTROL_PLANE_CALLBACK_TOKEN"]
 
 def test_probe_engine_execution(populated_db):
     class FakeResolver:

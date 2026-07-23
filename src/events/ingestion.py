@@ -64,10 +64,14 @@ def classify_error(item: Dict[str, Any]) -> tuple[int, str]:
 
 def ingest_event_callback(
     payload: Union[List[Dict[str, Any]], Dict[str, Any]],
-    conn = Depends(get_db_dep)
+    conn = Depends(get_db_dep),
+    validator = None,
 ):
     """
     Webhook callback endpoint to ingest standard logging payloads from LiteLLM proxy nodes.
+
+    validator: optional store module reference. When provided, validates that endpoint_id
+    and account_id exist in the database before processing state changes.
     """
     # Normalize to list
     items = payload if isinstance(payload, list) else [payload]
@@ -88,6 +92,24 @@ def ingest_event_callback(
 
         if not endpoint_id and not account_id:
             logger.debug("Callback item skipped: no endpoint_id or account_id metadata found.")
+            continue
+
+        # Validate referenced entities exist to prevent state injection from unknown IDs
+        if validator is not None:
+            if endpoint_id and not validator.get_endpoint(conn, endpoint_id):
+                logger.warning(
+                    f"Callback rejected: endpoint_id='{endpoint_id}' not found in database. "
+                    f"Possible misconfiguration or injection attempt."
+                )
+                endpoint_id = None  # nullify so we don't process health state
+            if account_id and not validator.get_account(conn, account_id):
+                logger.warning(
+                    f"Callback rejected: account_id='{account_id}' not found in database. "
+                    f"Possible misconfiguration or injection attempt."
+                )
+                account_id = None
+
+        if not endpoint_id and not account_id:
             continue
 
         # Check if failed or success

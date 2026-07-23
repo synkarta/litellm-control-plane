@@ -17,6 +17,10 @@ ADMIN_KEY = os.getenv("CONTROL_PLANE_ADMIN_KEY")
 if not ADMIN_KEY:
     raise RuntimeError("CONTROL_PLANE_ADMIN_KEY environment variable is required")
 
+CALLBACK_TOKEN = os.getenv("CONTROL_PLANE_CALLBACK_TOKEN")
+if not CALLBACK_TOKEN:
+    raise RuntimeError("CONTROL_PLANE_CALLBACK_TOKEN environment variable is required")
+
 logger = logging.getLogger("main")
 
 async def _reconcile_loop(interval_sec: int = 30) -> None:
@@ -81,7 +85,7 @@ app = FastAPI(
 
 # API Key security scheme definition
 API_KEY_NAME = "X-Admin-API-Key"
-api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+api_key_header = APIKeyHeader(name=API_KEY_NAME, scheme_name="AdminApiKey", auto_error=False)
 
 def get_api_key(api_key: str = Security(api_key_header)):
     """Validate incoming X-Admin-API-Key header against the configuration."""
@@ -91,6 +95,19 @@ def get_api_key(api_key: str = Security(api_key_header)):
             detail="Could not validate credentials"
         )
     return api_key
+
+# Callback Token security (separate from admin key — used by LiteLLM proxy nodes)
+CALLBACK_KEY_NAME = "X-Callback-Token"
+callback_key_header = APIKeyHeader(name=CALLBACK_KEY_NAME, scheme_name="CallbackToken", auto_error=False)
+
+def get_callback_key(token: str = Security(callback_key_header)):
+    """Validate incoming X-Callback-Token header for the event callback endpoint."""
+    if not token or token != CALLBACK_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing callback token"
+        )
+    return token
 
 @app.get("/health", tags=["system"])
 def health():
@@ -102,7 +119,10 @@ def metrics():
     """Expose Prometheus metrics."""
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
-# Register authenticated registry and audit routes
+# Register authenticated registry and audit routes (admin key required)
 app.include_router(routes.router, dependencies=[Depends(get_api_key)])
+
+# Register callback route with separate callback token (used by LiteLLM proxy nodes)
+app.include_router(routes.callback_router, dependencies=[Depends(get_callback_key)])
 
 

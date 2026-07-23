@@ -72,6 +72,19 @@ The control plane acts as a service directory and health governor, coordinating 
 4. **Monitoring**: The `Resource Node` continuously reports success/failure events back to the Control Plane.
 5. **Re-routing**: If the active Resource Node fails entirely (or all quotas on it are depleted), the Application queries the Control Plane again to discover and switch to another active node (e.g. `gw-us`).
 
+### Resource Node Assumptions & Prerequisites
+
+Before registering a new resource node in the control plane, ensure the following infrastructure and configuration prerequisites are met:
+
+*   **LiteLLM & Tailscale Installed**: Every resource node (VPS) must have `litellm` and `tailscale` configured and running.
+*   **Private Network Mesh**: All nodes and the control plane must join the same Tailnet to communicate securely and privately.
+*   **Mutual Network Connectivity**: 
+    *   **Control Plane ──> Resource Node**: The control plane must be able to reach the node's LiteLLM proxy port (e.g., `4000`) to query health and manage virtual keys.
+    *   **Resource Node ──> Control Plane**: The resource node must be able to reach the control plane's callback port (e.g., `8000/events/callback`) to post webhook metrics.
+*   **Master Key Injection**: The control plane's environment must possess the master key for the node, mapped as `LITELLM_MASTER_KEY_<NODE_ID>` (e.g., `LITELLM_MASTER_KEY_GW_KR`), to authenticate its orchestration calls.
+*   **Config Path Accessibility**: The control plane must have write access to the node's LiteLLM config path (e.g., via a mounted `SSHFS`/`NFS` directory, or running locally on the same host).
+*   **Clock Synchronization (NTP)**: Time synchronization (NTP) must be enabled on all servers. The health state machine and cooldown timers rely on precise UTC timestamp comparisons to transition states.
+
 ---
 
 ## Repository Structure

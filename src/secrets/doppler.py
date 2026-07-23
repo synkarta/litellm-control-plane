@@ -9,19 +9,31 @@ import httpx
 logger = logging.getLogger("doppler_resolver")
 
 class DopplerResolver:
-    def __init__(self, cache_ttl: float = 300.0, client: Optional[httpx.Client] = None):
+    def __init__(
+        self,
+        cache_ttl: float = 300.0,
+        client: Optional[httpx.Client] = None,
+        allow_env_fallback: Optional[bool] = None,
+    ):
         """
         doppler_resolver resolves references in the format: doppler://PROJECT/CONFIG/SECRET_NAME
 
         Args:
             cache_ttl: Time-to-live for cached secret dictionaries (in seconds)
             client: Optional httpx.Client instance for testing (caller owns its lifecycle)
+            allow_env_fallback: If True, fall back to local env vars when Doppler fails.
+                Defaults to the value of ALLOW_ENV_SECRET_FALLBACK env var (default: False).
+                Set to True only in local dev/test environments.
         """
         self.cache_ttl = cache_ttl
         self._external_client = client is not None
         self.client = client or httpx.Client(timeout=10.0)
         # Cache format: token -> (fetch_time, Dict[secret_key, secret_val])
         self._cache: Dict[str, Tuple[float, Dict[str, str]]] = {}
+        if allow_env_fallback is None:
+            self.allow_env_fallback = os.getenv("ALLOW_ENV_SECRET_FALLBACK", "false").lower() == "true"
+        else:
+            self.allow_env_fallback = allow_env_fallback
 
     def close(self) -> None:
         """Explicitly close the underlying HTTP client if we own it."""
@@ -103,54 +115,60 @@ class DopplerResolver:
     def resolve(self, uri: str) -> str:
         """
         Resolve a Doppler secret reference.
-        
-        Fallback strategy on failure:
-        If token resolution or HTTP fetch fails, attempts to read matching SECRET_NAME
-        directly from the local environment variables. If missing, raises ValueError.
+
+        Fallback strategy:
+        - If allow_env_fallback=True (ALLOW_ENV_SECRET_FALLBACK=true), falls back to
+          reading the SECRET_NAME directly from local environment variables on any failure.
+          This is intended for local dev/test environments only.
+        - If allow_env_fallback=False (default/production), any Doppler failure raises
+          immediately. Never silently uses a local env var that may belong to a different
+          environment or be stale.
         """
         project, config, secret_name = self.parse_uri(uri)
         token = self._get_token(project, config)
-        
+
         if not token:
-            # Fallback to local environment directly
-            local_val = os.getenv(secret_name)
-            if local_val is not None:
-                logger.warning(
-                    f"No Doppler token found for project='{project}' config='{config}'. "
-                    f"Falling back to local env var '{secret_name}'." 
-                )
-                return local_val
+            if self.allow_env_fallback:
+                local_val = os.getenv(secret_name)
+                if local_val is not None:
+                    logger.warning(
+                        f"No Doppler token found for project='{project}' config='{config}'. "
+                        f"Falling back to local env var '{secret_name}' (allow_env_fallback=True)."
+                    )
+                    return local_val
             raise ValueError(
                 f"Could not resolve secret '{uri}': No Doppler token found "
-                f"and local env var '{secret_name}' is unset."
+                f"for project='{project}' config='{config}'. "
+                f"Set ALLOW_ENV_SECRET_FALLBACK=true for local dev fallback."
             )
-            
+
         try:
             secrets = self._get_secrets_with_cache(token)
             if secret_name in secrets:
                 return secrets[secret_name]
-            # Key not found in Doppler response — fallback to local env
-            local_val = os.getenv(secret_name)
-            if local_val is not None:
-                logger.warning(
-                    f"Secret '{secret_name}' not found in Doppler config for "
-                    f"project='{project}' config='{config}'. Falling back to local env var."
-                )
-                return local_val
+            # Key not found in Doppler response
+            if self.allow_env_fallback:
+                local_val = os.getenv(secret_name)
+                if local_val is not None:
+                    logger.warning(
+                        f"Secret '{secret_name}' not found in Doppler config for "
+                        f"project='{project}' config='{config}'. "
+                        f"Falling back to local env var (allow_env_fallback=True)."
+                    )
+                    return local_val
             raise ValueError(
                 f"Secret key '{secret_name}' not found in resolved Doppler config "
-                f"and local env var is unset."
+                f"for project='{project}' config='{config}'."
             )
         except Exception as e:
-            # On any Doppler resolution exception, try local env fallback
-            local_val = os.getenv(secret_name)
-            if local_val is not None:
-                logger.warning(
-                    f"Doppler resolution failed for '{uri}' (error: {e}). "
-                    f"Falling back to local env var '{secret_name}'."
-                )
-                return local_val
+            if self.allow_env_fallback:
+                local_val = os.getenv(secret_name)
+                if local_val is not None:
+                    logger.warning(
+                        f"Doppler resolution failed for '{uri}' (error: {e}). "
+                        f"Falling back to local env var '{secret_name}' (allow_env_fallback=True)."
+                    )
+                    return local_val
             raise ValueError(
-                f"Failed to resolve secret '{uri}' from Doppler: {e}. "
-                f"Local env var fallback also failed."
-            )
+                f"Failed to resolve secret '{uri}' from Doppler: {e}."
+            ) from e

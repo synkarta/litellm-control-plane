@@ -17,9 +17,31 @@ from src.health import manager as health_manager
 from src.events import ingestion
 
 router = APIRouter()
+callback_router = APIRouter()
+
+# Actor names reserved for internal system components.
+# External callers must not claim these identities via X-Actor.
+_RESERVED_ACTORS = frozenset({
+    "system",
+    "reconcile-worker",
+    "probe",
+    "probe-engine",
+    "key-manager",
+    "callback-ingest",
+    "rollout-orchestrator",
+})
 
 def get_actor(x_actor: Optional[str] = Header(None, alias="X-Actor")) -> str:
-    """Resolve the actor identity from the X-Actor request header, defaulting to 'admin-api'."""
+    """Resolve the actor identity from the X-Actor request header.
+
+    Defaults to 'admin-api'. Rejects reserved internal actor names to prevent
+    audit log spoofing.
+    """
+    if x_actor and x_actor in _RESERVED_ACTORS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Actor name '{x_actor}' is reserved for internal system use."
+        )
     return x_actor or "admin-api"
 
 # --- Nodes Endpoints ---
@@ -289,15 +311,18 @@ def list_audit_logs(limit: int = Query(100, ge=1, le=1000), conn = Depends(get_d
 
 # --- Health & Ingestion Endpoints ---
 
-@router.post("/events/callback", tags=["events"])
+@callback_router.post("/events/callback", tags=["events"])
 def ingest_event_callback(
     payload: Union[List[Dict[str, Any]], Dict[str, Any]],
     conn = Depends(get_db_dep)
 ):
     """
     Webhook endpoint to ingest events from LiteLLM proxy nodes.
+    Requires X-Callback-Token (separate from the admin API key).
+    Validates that referenced endpoint_id and account_id exist before processing.
     """
-    return ingestion.ingest_event_callback(payload, conn)
+    from src.registry import store as _store
+    return ingestion.ingest_event_callback(payload, conn, validator=_store)
 
 @router.get("/health/summary", tags=["health"])
 def health_summary(conn = Depends(get_db_dep)):
