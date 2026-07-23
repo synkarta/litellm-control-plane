@@ -56,3 +56,10 @@ In all environments, raw keys must not be placed into `.env` files. You must use
 - **Database**: The SQLite engine should be replaced with PostgreSQL for multi-controller High Availability (HA).
 - **Docker**: Containerize the control plane.
 - **Tailscale**: Place the control plane and all LiteLLM nodes on a private Tailnet. Ensure API calls to the LiteLLM proxy (`/key/generate`) do not route over the public internet.
+
+---
+
+## Next Steps
+
+Once the control plane is deployed and running, refer to the [Getting Started Guide](file:///h:/litellm-control-plane/docs/getting-started.md) to register your nodes, providers, models, and accounts step-by-step.
+
