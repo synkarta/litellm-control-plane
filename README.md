@@ -86,9 +86,18 @@ To run natively:
 2. Install dependencies:
    * **Windows**: `.venv\Scripts\pip.exe install -r requirements.txt`
    * **Linux/macOS**: `.venv/bin/pip install -r requirements.txt`
-3. Start the API server:
-   * **Windows**: `.venv\Scripts\python.exe -m uvicorn src.api.main:app --reload`
-   * **Linux/macOS**: `.venv/bin/python -m uvicorn src.api.main:app --reload`
+3. Set the required admin key and start the API server:
+   * **Windows** (PowerShell):
+     ```powershell
+     $env:CONTROL_PLANE_ADMIN_KEY="my-secret-key"
+     .venv\Scripts\python.exe -m uvicorn src.api.main:app --reload
+     ```
+   * **Linux/macOS**:
+     ```bash
+     export CONTROL_PLANE_ADMIN_KEY="my-secret-key"
+     .venv/bin/python -m uvicorn src.api.main:app --reload
+     ```
+   *(Note: The `control_plane.db` SQLite database is automatically created and initialized on startup).*
 
 ### Docker Containerization (Optional)
 Using Docker is **completely optional** and not required for development or simple deployments. If containerized orchestration (such as Kubernetes) is desired:
@@ -96,9 +105,9 @@ Using Docker is **completely optional** and not required for development or simp
    ```bash
    docker build -t litellm-control-plane .
    ```
-2. Run the container (mounting a local host folder for SQLite persistence):
+2. Run the container (mounting a local host folder for SQLite persistence, and providing the admin key):
    ```bash
-   docker run -p 8000:8000 -v ./data:/app/data litellm-control-plane
+   docker run -p 8000:8000 -v ./data:/app/data -e CONTROL_PLANE_ADMIN_KEY="my-secret-key" litellm-control-plane
    ```
 
 ---

@@ -22,7 +22,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=8000 \
-    DATABASE_URL="/app/data/control_plane.db"
+    DATABASE_URL="/app/data/control_plane.db" \
+    CONTROL_PLANE_ADMIN_KEY="change-me-in-production"
 
 # Install system dependencies if any are needed (e.g. SQLite CLI for debugging)
 RUN apt-get update && apt-get install -y --no-install-recommends \
