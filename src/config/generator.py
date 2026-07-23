@@ -114,7 +114,8 @@ class ConfigGenerator:
         return {
             "model_list": model_list,
             "litellm_settings": {
-                "drop_params": True
+                "drop_params": True,
+                "callbacks": ["webhook"]
             }
         }
 
