@@ -4,33 +4,31 @@ This document describes the overall system architecture, boundaries, and key des
 
 ## 1. System Boundary: Control Plane vs. Data Plane
 
-The control plane sits *outside* the request path. It governs resources, configuration, health, policies, and secrets, while LiteLLM serves as the runtime gateway (the data plane) executing individual API requests.
+The control plane sits *outside* the synchronous LLM request path. It governs resources, configuration, health, policies, and secrets. Upstream clients query the control plane for active node discovery, then route actual LLM queries directly to the designated LiteLLM data plane nodes.
 
+```text
+               [1] Query Active Node Address
+      ┌──────────────────────────────────────────────────┐
+      │                                                  │
+      ▼                                                  │
++──────────────+                                  +────────────────────────+
+| API Clients  | ◄────────────────────────────────| LITELLM CONTROL PLANE  |
+|   / IDEs     |     [2] Return Healthy Node IP   | - Inventory Registry   |
++──────────────+                                  | - Policy & Auth Engine |
+      │                                           | - Doppler Secret Map   |
+      │                                           | - Health State Machine |
+      │                                           +────────────────────────+
+      │ [3] Direct LLM Requests                               ▲
+      │    (OpenAI API / Virtual Key)                         │ [4] Webhook Callbacks
+      ▼                                                       │     & Spend Events
++─────────────────────────────────────────────────────────────┴────────────+
+|                           LITELLM DATA PLANE                             |
+| - Low-latency Request Routing & Load Balancing (Primary vs. Backup Keys) |
+| - Provider Protocol Translation (OpenAI -> Anthropic, Ollama, NIM)       |
+| - Local Virtual Key Verification & Spend tracking                        |
++──────────────────────────────────────────────────────────────────────────+
 ```
-       +-----------------------+
-       |   API Clients / IDEs  |
-       +-----------------------+
-                   |
-                   v (OpenAI API / Virtual Key)
-+-------------------------------------------------+
-|               LITELLM DATA PLANE                |
-| - Virtual Key Verification & Spend tracking     |
-| - Low-latency Request Routing & Load Balancing  |
-| - Provider Protocol Translation (OpenAI -> Anthropic)
-| - Fast-path Retries & per-request Failover      |
-+-------------------------------------------------+
-    ^                                        |
-    | [1] Apply Config                       | [2] Callbacks & Spend Events
-    |                                        v
-+-------------------------------------------------+
-|             LITELLM CONTROL PLANE               |
-| - Inventory Registry (Nodes, Providers, Accounts)|
-| - Policy Engine (Logical -> Candidate Endpoints)|
-| - Doppler Secret Reference Mapping              |
-| - Account State Machine & Cooldowns             |
-| - Rollout Orchestrator (Canary & Rollback)       |
-+-------------------------------------------------+
-```
+
 
 ### Key Division of Labor
 *   **LiteLLM (Data Plane)**: Must remain highly available and low latency. It does not perform database lookups, query policy matrices, or load secrets from Doppler. It operates entirely on the local config file and virtual-key database injected by the control plane.
