@@ -260,7 +260,7 @@ class RolloutOrchestrator:
         if drift["config_drift"]:
             try:
                 logger.info(f"Reconciling config drift for node {node_id}...")
-                self.deploy_config(conn, node_id, config_filepath, timeout_sec=timeout_sec, mock_adapter=mock_adapter)
+                self.deploy_config(conn, node_id, path, timeout_sec=timeout_sec, mock_adapter=mock_adapter)
                 reconciled_config = True
             except Exception as e:
                 logger.error(f"Failed to reconcile config drift for node {node_id}: {e}")

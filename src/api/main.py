@@ -2,6 +2,11 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+
+# Load environment variables from .env file at startup
+load_dotenv()
+
 from fastapi import FastAPI, Depends, Security, HTTPException, status, Response
 from fastapi.security.api_key import APIKeyHeader
 from src.config.db import init_db, get_db
@@ -26,16 +31,26 @@ async def _reconcile_loop(interval_sec: int = 30) -> None:
     while True:
         await asyncio.sleep(interval_sec)
         try:
+            # 1. Reconcile cooldowns in thread (opens its own connection)
+            def run_cooldowns():
+                with get_db() as conn:
+                    engine.reconcile_cooldowns(conn, "reconcile-worker")
+            await asyncio.to_thread(run_cooldowns)
+            
+            # 2. Get active nodes list quickly from event loop thread
+            node_ids = []
             with get_db() as conn:
-                await asyncio.to_thread(engine.reconcile_cooldowns, conn, "reconcile-worker")
-                
-                # Auto-reconcile config and key drift
-                from src.api.routes import orchestrator
                 from src.registry import store
                 nodes = store.list_nodes(conn)
-                for node in nodes:
-                    if node.status == "active":
-                        await asyncio.to_thread(orchestrator.reconcile_node, conn, node.id)
+                node_ids = [n.id for n in nodes if n.status == "active"]
+
+            # 3. Auto-reconcile config and key drift for each active node in thread (opens its own connection)
+            from src.api.routes import orchestrator
+            for node_id in node_ids:
+                def run_reconcile(nid=node_id):
+                    with get_db() as conn:
+                        orchestrator.reconcile_node(conn, nid)
+                await asyncio.to_thread(run_reconcile)
         except asyncio.CancelledError:
             raise
         except Exception as e:

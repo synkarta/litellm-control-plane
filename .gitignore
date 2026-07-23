@@ -46,6 +46,7 @@ coverage.xml
 # Environments
 .env
 .env.*
+!.env.example
 .venv
 env/
 venv/
@@ -71,3 +72,9 @@ Thumbs.db
 # non-public files
 project_dox/
 .agents/rules/
+
+# SQLite databases and journals
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
