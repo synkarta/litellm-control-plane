@@ -61,5 +61,5 @@ In all environments, raw keys must not be placed into `.env` files. You must use
 
 ## Next Steps
 
-Once the control plane is deployed and running, refer to the [Getting Started Guide](file:///h:/litellm-control-plane/docs/getting-started.md) to register your nodes, providers, models, and accounts step-by-step.
+Once the control plane is deployed and running, refer to the [Getting Started Guide](getting-started.md) to register your nodes, providers, models, and accounts step-by-step.
 
