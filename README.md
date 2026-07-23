@@ -4,6 +4,13 @@
 
 LiteLLM itself remains the request-path execution gateway (translating providers, handling virtual keys, quotas, budgets, retries, and request-level fallback/cooldown routing). The control plane decides **what config should exist** and **what resources are eligible**, and then drives LiteLLM with those decisions.
 
+---
+
+### 📚 Documentation Quick Links
+👉 **[Getting Started Guide](file:///h:/litellm-control-plane/docs/getting-started.md)** | **[Deployment Guide](file:///h:/litellm-control-plane/docs/deployment-guide.md)** | **[FAQ](file:///h:/litellm-control-plane/docs/faq.md)**
+
+---
+
 ## Goals
 - **Multi-Node & Multi-Region Support**: Govern multi-node, multi-provider, multi-account, and multi-region topologies from a single control plane.
 - **Unified Inventory**: Keep structured registries for Nodes, Providers, Accounts, Models, and concrete Endpoints.
