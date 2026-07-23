@@ -18,30 +18,36 @@ LiteLLM itself remains the request-path execution gateway (translating providers
 - Not a financial ledger (spend logs are used as operational signals, not accounting truth).
 - Not a secret vault (secrets stay in Doppler).
 
-## System Architecture
+The control plane acts as a service directory and health governor, coordinating multiple stateless LiteLLM nodes:
 
-The control plane sits above the LiteLLM proxy data plane:
+```text
+               1. Query Active Node / Resolve Endpoint
+      ┌──────────────────────────────────────────────────┐
+      │                                                  │
+      ▼                                                  │
++──────────────+                                  +────────────────────────+
+| Applications | ◄────────────────────────────────| litellm-control-plane  |
+|  (Consumers) |     2. Return Healthy Node IP    | (Control & Governance) |
++──────────────+                                  +────────────────────────+
+      │                                                      ▲
+      │ 3. Direct LLM Requests                               │ 4. Ingest Metrics
+      │    (Keeps querying node until fail/429)              │    & Failures
+      ▼                                                      │
++────────────────────────────────────────────────────────────┴─────────────+
+|               Resource Nodes (LiteLLM Data Plane Proxies)                |
+|           [Node gw-kr (Tailscale)]     [Node gw-us (Tailscale)]          |
++──────────────────────────────────────────────────────────────────────────+
+```
 
-```
-+---------------------------------------+
-|             Applications              | (Coding agents, Chat services, IDEs)
-+---------------------------------------+
-                   |
-                   v (Requests / Virtual Keys)
-+---------------------------------------+
-|       LiteLLM Data Plane (Proxy)      | (Execution, translation, retries)
-+---------------------------------------+
-         ^                      ^
-         | (Apply Config)       | (Metrics / Callbacks)
-+---------------------------------------+
-|        litellm-control-plane          | (Inventory, health state, policy)
-+---------------------------------------+
-         | (Scoping / Metadata)
-         v
-+---------------------------------------+
-|  Infra Resources (Doppler, Tailscale) |
-+---------------------------------------+
-```
+### Request & Failover Lifecycle
+
+1. **Discovery**: The `Application` (Consumer) initially queries the `litellm-control-plane` (e.g. `/health/summary` or `/nodes/available`) to find a healthy, active Resource Node.
+2. **Resolution**: The Control Plane returns the address of an active node (e.g. `gw-kr`).
+3. **Execution**: The Application queries the `Resource Node` directly for LLM chat completions. Per-request retries and failovers (e.g. between primary and backup keys on that node) are handled locally by LiteLLM.
+4. **Monitoring**: The `Resource Node` continuously reports success/failure events back to the Control Plane.
+5. **Re-routing**: If the active Resource Node fails entirely (or all quotas on it are depleted), the Application queries the Control Plane again to discover and switch to another active node (e.g. `gw-us`).
+
+---
 
 ## Repository Structure
 
